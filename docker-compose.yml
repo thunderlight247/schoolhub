@@ -1,0 +1,78 @@
+name: schoolhub
+
+services:
+  postgres:
+    image: postgres:16-alpine
+    restart: unless-stopped
+    environment:
+      POSTGRES_USER: ${POSTGRES_USER:-schoolhub}
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:-schoolhub}
+      POSTGRES_DB: ${POSTGRES_DB:-schoolhub}
+    ports:
+      - "${POSTGRES_PORT:-5432}:5432"
+    volumes:
+      - schoolhub_postgres_data:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U ${POSTGRES_USER:-schoolhub}"]
+      interval: 5s
+      timeout: 5s
+      retries: 5
+
+  backend:
+    build:
+      context: ./backend
+    restart: unless-stopped
+    depends_on:
+      postgres:
+        condition: service_healthy
+    environment:
+      PORT: 8080
+      APP_ENV: development
+      DATABASE_URL: postgres://${POSTGRES_USER:-schoolhub}:${POSTGRES_PASSWORD:-schoolhub}@postgres:5432/${POSTGRES_DB:-schoolhub}?sslmode=disable
+    ports:
+      - "8080:8080"
+
+  # The Next.js frontend is intentionally NOT containerized in local dev —
+  # `npm run dev` against the containerized backend is faster to iterate on.
+  # A frontend Dockerfile can be added later if a fully containerized
+  # environment becomes useful (e.g. for CI).
+
+  # Runs handwritten SQL migrations (backend/migrations) against `postgres`
+  # using the official golang-migrate image — no local `migrate` CLI install
+  # needed. This is a one-off tool, not a long-running service, so it's
+  # gated behind a profile and only runs when explicitly invoked. The
+  # -path/-database flags are baked into the entrypoint via compose variable
+  # substitution; the default command is "up", overridable e.g.:
+  #   docker compose run --rm migrate up
+  #   docker compose run --rm migrate down 1
+  #   docker compose run --rm migrate version
+  migrate:
+    image: migrate/migrate:v4.17.1
+    profiles: ["tools"]
+    depends_on:
+      postgres:
+        condition: service_healthy
+    volumes:
+      - ./backend/migrations:/migrations
+    entrypoint:
+      - migrate
+      - -path=/migrations
+      - -database=postgres://${POSTGRES_USER:-schoolhub}:${POSTGRES_PASSWORD:-schoolhub}@postgres:5432/${POSTGRES_DB:-schoolhub}?sslmode=disable
+    command: ["up"]
+
+  # Generates Go code (backend/db/generated) from sqlc.yaml + the schema in
+  # backend/migrations/*.up.sql + the queries in backend/db/queries/, using
+  # the official sqlc image — no local sqlc CLI install needed. Doesn't need
+  # a running database: sqlc parses the SQL files directly. Usage:
+  #   docker compose run --rm sqlc generate
+  #   docker compose run --rm sqlc vet       (needs a real DB — see README)
+  sqlc:
+    image: sqlc/sqlc:1.27.0
+    profiles: ["tools"]
+    working_dir: /src
+    volumes:
+      - ./backend:/src
+    command: ["generate"]
+
+volumes:
+  schoolhub_postgres_data:
