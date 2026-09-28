@@ -1,0 +1,26 @@
+version: "2"
+sql:
+  - engine: "postgresql"
+    queries: "db/queries"
+    # Only the *.up.sql files define the schema sqlc should generate against.
+    # The migrations directory also holds *.down.sql files (DROP statements
+    # used for rollback); pointing sqlc at those too would make it parse
+    # DROP TABLE statements as part of "the schema", so this glob excludes
+    # them explicitly rather than relying on filename sort order.
+    schema: "migrations/*.up.sql"
+    gen:
+      go:
+        package: "db"
+        out: "db/generated"
+        sql_package: "pgx/v5"
+        emit_json_tags: true
+        emit_interface: true
+        emit_empty_slices: true
+        emit_exact_table_names: false
+        overrides:
+          # Every PK/FK in the schema is UUID (section 7). Without this
+          # override sqlc maps uuid -> pgtype.UUID, which works but is
+          # awkward to construct/compare in handler code. google/uuid.UUID
+          # is the more ergonomic, widely-used choice.
+          - db_type: "uuid"
+            go_type: "github.com/google/uuid.UUID"
