@@ -1,0 +1,22 @@
+# Environment
+.env
+.env.local
+*.env
+
+# Node / Next.js
+node_modules/
+frontend/.next/
+frontend/out/
+frontend/.env*.local
+frontend/next-env.d.ts
+*.tsbuildinfo
+
+# Go
+backend/schoolhub-server
+backend/tmp/
+
+# OS / editor
+.DS_Store
+*.log
+.vscode/
+.idea/
