@@ -14,6 +14,7 @@ frontend/next-env.d.ts
 # Go
 backend/schoolhub-server
 backend/tmp/
+backend/cookies.txt
 
 # OS / editor
 .DS_Store

@@ -13,12 +13,27 @@ import (
 type Querier interface {
 	AssignPermissionToRole(ctx context.Context, arg AssignPermissionToRoleParams) error
 	AssignRoleToUser(ctx context.Context, arg AssignRoleToUserParams) error
+	CreateInvitationToken(ctx context.Context, arg CreateInvitationTokenParams) (InvitationToken, error)
+	CreatePasswordResetToken(ctx context.Context, arg CreatePasswordResetTokenParams) (PasswordResetToken, error)
 	CreatePerson(ctx context.Context, arg CreatePersonParams) (Person, error)
+	CreateSession(ctx context.Context, arg CreateSessionParams) (Session, error)
 	CreateUser(ctx context.Context, arg CreateUserParams) (User, error)
+	// Used on password change (and by the admin "suspend user" action in M5) to
+	// force re-login everywhere, not just the current device.
+	DeleteAllSessionsForUser(ctx context.Context, userID uuid.UUID) error
+	// No cron/scheduler exists yet to call this periodically (deliberately out
+	// of scope for M4 — see section 39, not adding infrastructure speculatively).
+	// Expired sessions are already rejected by ValidateSession's expiry check
+	// regardless; this just reclaims the rows.
+	DeleteExpiredSessions(ctx context.Context) error
+	DeleteSession(ctx context.Context, tokenHash string) error
+	GetInvitationTokenByHash(ctx context.Context, tokenHash string) (InvitationToken, error)
+	GetPasswordResetTokenByHash(ctx context.Context, tokenHash string) (PasswordResetToken, error)
 	GetPermissionByCode(ctx context.Context, code string) (Permission, error)
 	GetPersonByID(ctx context.Context, id uuid.UUID) (Person, error)
 	GetRoleByID(ctx context.Context, id uuid.UUID) (Role, error)
 	GetRoleByName(ctx context.Context, name string) (Role, error)
+	GetSessionByTokenHash(ctx context.Context, tokenHash string) (Session, error)
 	// The login lookup. Returns SUSPENDED/INACTIVE users too — M4's auth
 	// service is responsible for checking `status` before issuing a session,
 	// not this query (see fix(auth): prevent suspended users from logging in
@@ -34,6 +49,8 @@ type Querier interface {
 	ListPermissionsForUser(ctx context.Context, userID uuid.UUID) ([]Permission, error)
 	ListRoles(ctx context.Context) ([]Role, error)
 	ListRolesForUser(ctx context.Context, userID uuid.UUID) ([]Role, error)
+	MarkInvitationTokenAccepted(ctx context.Context, id uuid.UUID) error
+	MarkPasswordResetTokenUsed(ctx context.Context, id uuid.UUID) error
 	RecordUserLogin(ctx context.Context, id uuid.UUID) error
 	RevokePermissionFromRole(ctx context.Context, arg RevokePermissionFromRoleParams) error
 	RevokeRoleFromUser(ctx context.Context, arg RevokeRoleFromUserParams) error

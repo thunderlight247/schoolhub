@@ -9,6 +9,27 @@ import (
 	"github.com/jackc/pgx/v5/pgtype"
 )
 
+type InvitationToken struct {
+	ID         uuid.UUID          `json:"id"`
+	PersonID   uuid.UUID          `json:"person_id"`
+	Email      string             `json:"email"`
+	RoleID     uuid.UUID          `json:"role_id"`
+	InvitedBy  uuid.UUID          `json:"invited_by"`
+	TokenHash  string             `json:"token_hash"`
+	CreatedAt  pgtype.Timestamptz `json:"created_at"`
+	ExpiresAt  pgtype.Timestamptz `json:"expires_at"`
+	AcceptedAt pgtype.Timestamptz `json:"accepted_at"`
+}
+
+type PasswordResetToken struct {
+	ID        uuid.UUID          `json:"id"`
+	UserID    uuid.UUID          `json:"user_id"`
+	TokenHash string             `json:"token_hash"`
+	CreatedAt pgtype.Timestamptz `json:"created_at"`
+	ExpiresAt pgtype.Timestamptz `json:"expires_at"`
+	UsedAt    pgtype.Timestamptz `json:"used_at"`
+}
+
 type Permission struct {
 	ID          uuid.UUID          `json:"id"`
 	Code        string             `json:"code"`
@@ -40,6 +61,16 @@ type Role struct {
 type RolePermission struct {
 	RoleID       uuid.UUID `json:"role_id"`
 	PermissionID uuid.UUID `json:"permission_id"`
+}
+
+type Session struct {
+	ID        uuid.UUID          `json:"id"`
+	UserID    uuid.UUID          `json:"user_id"`
+	TokenHash string             `json:"token_hash"`
+	UserAgent pgtype.Text        `json:"user_agent"`
+	IpAddress pgtype.Text        `json:"ip_address"`
+	CreatedAt pgtype.Timestamptz `json:"created_at"`
+	ExpiresAt pgtype.Timestamptz `json:"expires_at"`
 }
 
 type User struct {

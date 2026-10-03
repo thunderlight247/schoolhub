@@ -1,7 +1,9 @@
-// Command server is the entrypoint for the SchoolHub API. At this milestone
-// it does nothing beyond: load config, connect to PostgreSQL, and expose a
-// health-check endpoint. Business logic (auth, students, staff, ...) is
-// added in later milestones under internal/.
+// Command server is the entrypoint for the SchoolHub API. It loads config,
+// connects to PostgreSQL, wires up each domain's handlers, and starts the
+// HTTP server. Each milestone adds its own wiring here as new domains gain
+// real implementations (M4: auth; M5: RBAC middleware; M6+: everything
+// else) — this file stays a thin composition root, not where business
+// logic lives.
 package main
 
 import (
@@ -13,8 +15,10 @@ import (
 	"github.com/gin-gonic/gin"
 	"github.com/joho/godotenv"
 
-	"github.com/yourusername/schoolhub/backend/config"
-	"github.com/yourusername/schoolhub/backend/internal/database"
+	"github.com/thunderlight247/schoolhub/backend/config"
+	db "github.com/thunderlight247/schoolhub/backend/db/generated"
+	"github.com/thunderlight247/schoolhub/backend/internal/auth"
+	"github.com/thunderlight247/schoolhub/backend/internal/database"
 )
 
 func main() {
@@ -36,11 +40,22 @@ func main() {
 	}
 	defer pool.Close()
 
+	queries := db.New(pool)
+	authService := auth.NewService(queries)
+
+	const sessionCookieName = "schoolhub_session"
+	authHandler := auth.NewHandler(authService, auth.CookieConfig{
+		Name:   sessionCookieName,
+		Domain: cfg.CookieDomain,
+		Secure: cfg.IsProduction(),
+	})
+
 	if cfg.IsProduction() {
 		gin.SetMode(gin.ReleaseMode)
 	}
 
 	router := gin.Default()
+	router.Use(corsMiddleware(cfg.FrontendURL))
 
 	// /api/v1/health lets the frontend, deployment platform, and load
 	// balancers all verify the API is up and can reach the database.
@@ -62,9 +77,40 @@ func main() {
 		})
 	})
 
+	v1 := router.Group("/api/v1")
+	{
+		v1.POST("/auth/login", authHandler.Login)
+		v1.POST("/auth/logout", authHandler.Logout)
+		v1.GET("/me", auth.RequireAuth(authService, sessionCookieName), authHandler.Me)
+	}
+
 	addr := ":" + cfg.Port
 	log.Printf("SchoolHub API listening on %s (env=%s)", addr, cfg.Environment)
 	if err := router.Run(addr); err != nil {
 		log.Fatalf("server error: %v", err)
 	}
 }
+
+// corsMiddleware allows exactly one origin (the frontend) to make
+// credentialed requests — session cookies only work cross-origin (the
+// frontend on :3000, the API on :8080 even in local dev, are different
+// origins) if the server explicitly echoes back that one origin and sets
+// Access-Control-Allow-Credentials. A wildcard "*" origin is rejected by
+// browsers when credentials are involved, so this can't just be gin's
+// default permissive CORS setup.
+func corsMiddleware(allowedOrigin string) gin.HandlerFunc {
+	return func(c *gin.Context) {
+		c.Header("Access-Control-Allow-Origin", allowedOrigin)
+		c.Header("Access-Control-Allow-Credentials", "true")
+		c.Header("Access-Control-Allow-Methods", "GET, POST, PATCH, DELETE, OPTIONS")
+		c.Header("Access-Control-Allow-Headers", "Content-Type, Authorization")
+
+		if c.Request.Method == http.MethodOptions {
+			c.AbortWithStatus(http.StatusNoContent)
+			return
+		}
+
+		c.Next()
+	}
+}
+
