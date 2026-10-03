@@ -49,3 +49,12 @@ func CurrentUser(c *gin.Context) (AuthenticatedUser, bool) {
 	authUser, ok := val.(AuthenticatedUser)
 	return authUser, ok
 }
+
+// WithUser stores u in the request context exactly as RequireAuth does
+// after a successful session lookup. Normal request handling never calls
+// this — RequireAuth is the only production path; it exists so tests of
+// authorization middleware and handlers downstream can simulate an
+// already-authenticated request without spinning up real sessions.
+func WithUser(c *gin.Context, u AuthenticatedUser) {
+	c.Set(contextKeyUser, u)
+}

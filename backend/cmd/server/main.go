@@ -19,6 +19,7 @@ import (
 	db "github.com/thunderlight247/schoolhub/backend/db/generated"
 	"github.com/thunderlight247/schoolhub/backend/internal/auth"
 	"github.com/thunderlight247/schoolhub/backend/internal/database"
+	"github.com/thunderlight247/schoolhub/backend/internal/rbac"
 )
 
 func main() {
@@ -49,6 +50,9 @@ func main() {
 		Domain: cfg.CookieDomain,
 		Secure: cfg.IsProduction(),
 	})
+
+	rbacService := rbac.NewService(queries)
+	rbacHandler := rbac.NewHandler(queries)
 
 	if cfg.IsProduction() {
 		gin.SetMode(gin.ReleaseMode)
@@ -84,6 +88,21 @@ func main() {
 		v1.GET("/me", auth.RequireAuth(authService, sessionCookieName), authHandler.Me)
 	}
 
+	// RBAC management: viewing roles/permissions and customizing which
+	// permissions a role holds (on top of the default mapping migration
+	// 000004 seeds). Gated on the ADMIN role directly, not a permission
+	// code — see rbac.RequireRole's doc comment for why.
+	rbacRoutes := v1.Group("")
+	rbacRoutes.Use(auth.RequireAuth(authService, sessionCookieName))
+	rbacRoutes.Use(rbac.RequireRole(rbacService, "ADMIN"))
+	{
+		rbacRoutes.GET("/roles", rbacHandler.ListRoles)
+		rbacRoutes.GET("/permissions", rbacHandler.ListPermissions)
+		rbacRoutes.GET("/roles/:id/permissions", rbacHandler.ListRolePermissions)
+		rbacRoutes.POST("/roles/:id/permissions", rbacHandler.AssignPermission)
+		rbacRoutes.DELETE("/roles/:id/permissions/:permission_id", rbacHandler.RevokePermission)
+	}
+
 	addr := ":" + cfg.Port
 	log.Printf("SchoolHub API listening on %s (env=%s)", addr, cfg.Environment)
 	if err := router.Run(addr); err != nil {
@@ -113,4 +132,3 @@ func corsMiddleware(allowedOrigin string) gin.HandlerFunc {
 		c.Next()
 	}
 }
-

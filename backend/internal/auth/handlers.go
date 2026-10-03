@@ -39,22 +39,28 @@ type loginRequest struct {
 
 // userDTO is what the API actually returns for "the current user" — never
 // the generated db.User directly, which has a PasswordHash field that
-// must never leave the server.
+// must never leave the server. Roles/Permissions are included (M5) so the
+// frontend can render role-aware navigation; they are informational — the
+// backend still enforces every permission server-side.
 type userDTO struct {
-	ID        string `json:"id"`
-	Email     string `json:"email"`
-	FirstName string `json:"first_name"`
-	LastName  string `json:"last_name"`
-	Status    string `json:"status"`
+	ID          string   `json:"id"`
+	Email       string   `json:"email"`
+	FirstName   string   `json:"first_name"`
+	LastName    string   `json:"last_name"`
+	Status      string   `json:"status"`
+	Roles       []string `json:"roles"`
+	Permissions []string `json:"permissions"`
 }
 
 func toUserDTO(u AuthenticatedUser) userDTO {
 	return userDTO{
-		ID:        u.User.ID.String(),
-		Email:     u.User.Email,
-		FirstName: u.Person.FirstName,
-		LastName:  u.Person.LastName,
-		Status:    u.User.Status,
+		ID:          u.User.ID.String(),
+		Email:       u.User.Email,
+		FirstName:   u.Person.FirstName,
+		LastName:    u.Person.LastName,
+		Status:      u.User.Status,
+		Roles:       u.Roles,
+		Permissions: u.Permissions,
 	}
 }
 

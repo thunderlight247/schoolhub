@@ -37,10 +37,45 @@ func NewService(queries db.Querier) *Service {
 
 // AuthenticatedUser is what a successful login or session lookup returns —
 // enough to populate request context without a second round trip for most
-// handlers.
+// handlers. Roles and Permissions are the caller's role names and effective
+// permission codes (resolved through user_roles → role_permissions at
+// lookup time), so handlers and the frontend can make authorization-aware
+// decisions without extra round trips. Enforcement still happens
+// server-side per route via rbac.RequirePermission — these fields are for
+// convenience/UX (e.g. rendering the right navigation), never a substitute
+// for the middleware check.
 type AuthenticatedUser struct {
-	User   db.User
-	Person db.Person
+	User        db.User
+	Person      db.Person
+	Roles       []string
+	Permissions []string
+}
+
+// loadAuthorization resolves the user's role names and effective permission
+// codes and attaches them to authUser. Both slices are initialized empty
+// (never nil) so they serialize as [] rather than null. A failure here
+// fails closed: Login/ValidateSession propagate the error rather than
+// issuing a session whose authorization data couldn't be loaded.
+func (s *Service) loadAuthorization(ctx context.Context, authUser AuthenticatedUser) (AuthenticatedUser, error) {
+	roles, err := s.queries.ListRolesForUser(ctx, authUser.User.ID)
+	if err != nil {
+		return AuthenticatedUser{}, err
+	}
+	authUser.Roles = make([]string, 0, len(roles))
+	for _, r := range roles {
+		authUser.Roles = append(authUser.Roles, r.Name)
+	}
+
+	perms, err := s.queries.ListPermissionsForUser(ctx, authUser.User.ID)
+	if err != nil {
+		return AuthenticatedUser{}, err
+	}
+	authUser.Permissions = make([]string, 0, len(perms))
+	for _, p := range perms {
+		authUser.Permissions = append(authUser.Permissions, p.Code)
+	}
+
+	return authUser, nil
 }
 
 // Login verifies an email/password pair and, on success, creates a new
@@ -89,7 +124,12 @@ func (s *Service) Login(ctx context.Context, email, password string, userAgent, 
 		return "", AuthenticatedUser{}, err
 	}
 
-	return token, AuthenticatedUser{User: user, Person: person}, nil
+	authUser, err := s.loadAuthorization(ctx, AuthenticatedUser{User: user, Person: person})
+	if err != nil {
+		return "", AuthenticatedUser{}, err
+	}
+
+	return token, authUser, nil
 }
 
 // Logout deletes the session matching the given raw token. Deleting a
@@ -128,7 +168,15 @@ func (s *Service) ValidateSession(ctx context.Context, token string) (Authentica
 		return AuthenticatedUser{}, ErrSessionInvalid
 	}
 
-	return AuthenticatedUser{User: user, Person: person}, nil
+	authUser, err := s.loadAuthorization(ctx, AuthenticatedUser{User: user, Person: person})
+	if err != nil {
+		// Fail closed: a transient failure resolving permissions rejects the
+		// request (mapped to 401 by RequireAuth) rather than serving it with
+		// unknown authorization data.
+		return AuthenticatedUser{}, ErrSessionInvalid
+	}
+
+	return authUser, nil
 }
 
 // --- pgtype conversion helpers ---
