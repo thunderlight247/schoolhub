@@ -27,6 +27,18 @@ func (q *Queries) AssignRoleToUser(ctx context.Context, arg AssignRoleToUserPara
 	return err
 }
 
+const clearUserRoles = `-- name: ClearUserRoles :exec
+DELETE FROM user_roles
+WHERE user_id = $1
+`
+
+// Used by the admin "replace a user's roles" flow (M6): the transaction
+// deletes all current rows then re-assigns the requested set atomically.
+func (q *Queries) ClearUserRoles(ctx context.Context, userID uuid.UUID) error {
+	_, err := q.db.Exec(ctx, clearUserRoles, userID)
+	return err
+}
+
 const listPermissionsForUser = `-- name: ListPermissionsForUser :many
 SELECT DISTINCT p.id, p.code, p.description, p.created_at
 FROM permissions p

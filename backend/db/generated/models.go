@@ -9,6 +9,24 @@ import (
 	"github.com/jackc/pgx/v5/pgtype"
 )
 
+type AuditLog struct {
+	ID           uuid.UUID          `json:"id"`
+	ActorUserID  pgtype.UUID        `json:"actor_user_id"`
+	Action       string             `json:"action"`
+	ResourceType string             `json:"resource_type"`
+	ResourceID   pgtype.UUID        `json:"resource_id"`
+	Metadata     []byte             `json:"metadata"`
+	CreatedAt    pgtype.Timestamptz `json:"created_at"`
+}
+
+type Department struct {
+	ID          uuid.UUID          `json:"id"`
+	Name        string             `json:"name"`
+	Description pgtype.Text        `json:"description"`
+	CreatedAt   pgtype.Timestamptz `json:"created_at"`
+	UpdatedAt   pgtype.Timestamptz `json:"updated_at"`
+}
+
 type InvitationToken struct {
 	ID         uuid.UUID          `json:"id"`
 	PersonID   uuid.UUID          `json:"person_id"`
@@ -71,6 +89,27 @@ type Session struct {
 	IpAddress pgtype.Text        `json:"ip_address"`
 	CreatedAt pgtype.Timestamptz `json:"created_at"`
 	ExpiresAt pgtype.Timestamptz `json:"expires_at"`
+}
+
+type Staff struct {
+	ID               uuid.UUID          `json:"id"`
+	PersonID         uuid.UUID          `json:"person_id"`
+	StaffNumber      string             `json:"staff_number"`
+	DepartmentID     pgtype.UUID        `json:"department_id"`
+	PositionID       pgtype.UUID        `json:"position_id"`
+	EmploymentStatus string             `json:"employment_status"`
+	HiredDate        pgtype.Date        `json:"hired_date"`
+	CreatedAt        pgtype.Timestamptz `json:"created_at"`
+	UpdatedAt        pgtype.Timestamptz `json:"updated_at"`
+}
+
+type StaffPosition struct {
+	ID          uuid.UUID          `json:"id"`
+	Title       string             `json:"title"`
+	Category    string             `json:"category"`
+	Description pgtype.Text        `json:"description"`
+	CreatedAt   pgtype.Timestamptz `json:"created_at"`
+	UpdatedAt   pgtype.Timestamptz `json:"updated_at"`
 }
 
 type User struct {

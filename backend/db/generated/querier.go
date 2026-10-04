@@ -13,10 +13,22 @@ import (
 type Querier interface {
 	AssignPermissionToRole(ctx context.Context, arg AssignPermissionToRoleParams) error
 	AssignRoleToUser(ctx context.Context, arg AssignRoleToUserParams) error
+	// Used by the admin "replace a user's roles" flow (M6): the transaction
+	// deletes all current rows then re-assigns the requested set atomically.
+	ClearUserRoles(ctx context.Context, userID uuid.UUID) error
+	// Must stay in sync with ListStaff's WHERE clause (see comment there).
+	CountStaff(ctx context.Context, arg CountStaffParams) (int64, error)
+	// Append-only: no UPDATE/DELETE queries exist for this table by design
+	// (see migration 000006). Callers pass a tx-bound Querier so the audit
+	// row commits atomically with the mutation it describes.
+	CreateAuditLog(ctx context.Context, arg CreateAuditLogParams) error
+	CreateDepartment(ctx context.Context, arg CreateDepartmentParams) (Department, error)
 	CreateInvitationToken(ctx context.Context, arg CreateInvitationTokenParams) (InvitationToken, error)
 	CreatePasswordResetToken(ctx context.Context, arg CreatePasswordResetTokenParams) (PasswordResetToken, error)
 	CreatePerson(ctx context.Context, arg CreatePersonParams) (Person, error)
 	CreateSession(ctx context.Context, arg CreateSessionParams) (Session, error)
+	CreateStaff(ctx context.Context, arg CreateStaffParams) (Staff, error)
+	CreateStaffPosition(ctx context.Context, arg CreateStaffPositionParams) (StaffPosition, error)
 	CreateUser(ctx context.Context, arg CreateUserParams) (User, error)
 	// Used on password change (and by the admin "suspend user" action in M5) to
 	// force re-login everywhere, not just the current device.
@@ -27,6 +39,7 @@ type Querier interface {
 	// regardless; this just reclaims the rows.
 	DeleteExpiredSessions(ctx context.Context) error
 	DeleteSession(ctx context.Context, tokenHash string) error
+	GetDepartmentByID(ctx context.Context, id uuid.UUID) (Department, error)
 	GetInvitationTokenByHash(ctx context.Context, tokenHash string) (InvitationToken, error)
 	GetPasswordResetTokenByHash(ctx context.Context, tokenHash string) (PasswordResetToken, error)
 	GetPermissionByCode(ctx context.Context, code string) (Permission, error)
@@ -34,6 +47,13 @@ type Querier interface {
 	GetRoleByID(ctx context.Context, id uuid.UUID) (Role, error)
 	GetRoleByName(ctx context.Context, name string) (Role, error)
 	GetSessionByTokenHash(ctx context.Context, tokenHash string) (Session, error)
+	// The staff detail row: employment record + person data + the lookup names,
+	// in one round trip. The account columns stay out of this join on purpose —
+	// the service resolves the (optionally absent) user account separately via
+	// GetUserByPersonID, which sidesteps nullable-uuid edge cases in the scan
+	// struct for a LEFT JOINed users row.
+	GetStaffByID(ctx context.Context, id uuid.UUID) (GetStaffByIDRow, error)
+	GetStaffPositionByID(ctx context.Context, id uuid.UUID) (StaffPosition, error)
 	// The login lookup. Returns SUSPENDED/INACTIVE users too — M4's auth
 	// service is responsible for checking `status` before issuing a session,
 	// not this query (see fix(auth): prevent suspended users from logging in
@@ -41,6 +61,7 @@ type Querier interface {
 	GetUserByEmail(ctx context.Context, email string) (User, error)
 	GetUserByID(ctx context.Context, id uuid.UUID) (User, error)
 	GetUserByPersonID(ctx context.Context, personID uuid.UUID) (User, error)
+	ListDepartments(ctx context.Context) ([]Department, error)
 	ListPermissions(ctx context.Context) ([]Permission, error)
 	ListPermissionsForRole(ctx context.Context, roleID uuid.UUID) ([]Permission, error)
 	// Every permission the user holds across all of their roles, deduplicated.
@@ -49,6 +70,13 @@ type Querier interface {
 	ListPermissionsForUser(ctx context.Context, userID uuid.UUID) ([]Permission, error)
 	ListRoles(ctx context.Context) ([]Role, error)
 	ListRolesForUser(ctx context.Context, userID uuid.UUID) ([]Role, error)
+	// Paginated, filtered staff list (section 25). Filtering happens here at
+	// the database layer, never in application code. Every filter is optional:
+	// a NULL narg disables that condition. Keep this WHERE clause and
+	// CountStaff's in sync — they must filter identically for total_pages to
+	// be correct.
+	ListStaff(ctx context.Context, arg ListStaffParams) ([]ListStaffRow, error)
+	ListStaffPositions(ctx context.Context) ([]StaffPosition, error)
 	MarkInvitationTokenAccepted(ctx context.Context, id uuid.UUID) error
 	MarkPasswordResetTokenUsed(ctx context.Context, id uuid.UUID) error
 	RecordUserLogin(ctx context.Context, id uuid.UUID) error
@@ -57,7 +85,13 @@ type Querier interface {
 	// Backs the admin "search students/staff by name" screens (section 25).
 	// Pagination happens here at the query level, not in application code.
 	SearchPeopleByName(ctx context.Context, arg SearchPeopleByNameParams) ([]Person, error)
+	SetStaffEmploymentStatus(ctx context.Context, arg SetStaffEmploymentStatusParams) (Staff, error)
 	UpdatePerson(ctx context.Context, arg UpdatePersonParams) (Person, error)
+	// The staff.update path: department, position, and hired date. Employment
+	// status is deliberately NOT set here — status changes go through
+	// SetStaffEmploymentStatus so they can carry the staff.deactivate
+	// permission and their own audit event.
+	UpdateStaffAssignment(ctx context.Context, arg UpdateStaffAssignmentParams) (Staff, error)
 	UpdateUserPasswordHash(ctx context.Context, arg UpdateUserPasswordHashParams) error
 	UpdateUserStatus(ctx context.Context, arg UpdateUserStatusParams) error
 	// A single boolean check, cheaper than fetching the full permission list

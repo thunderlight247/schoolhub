@@ -14,6 +14,12 @@ ON CONFLICT DO NOTHING;
 DELETE FROM user_roles
 WHERE user_id = sqlc.arg(user_id) AND role_id = sqlc.arg(role_id);
 
+-- name: ClearUserRoles :exec
+-- Used by the admin "replace a user's roles" flow (M6): the transaction
+-- deletes all current rows then re-assigns the requested set atomically.
+DELETE FROM user_roles
+WHERE user_id = sqlc.arg(user_id);
+
 -- name: ListPermissionsForUser :many
 -- Every permission the user holds across all of their roles, deduplicated.
 -- Section 11: "The backend must enforce authorization" — this is the query

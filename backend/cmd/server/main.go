@@ -20,6 +20,7 @@ import (
 	"github.com/thunderlight247/schoolhub/backend/internal/auth"
 	"github.com/thunderlight247/schoolhub/backend/internal/database"
 	"github.com/thunderlight247/schoolhub/backend/internal/rbac"
+	"github.com/thunderlight247/schoolhub/backend/internal/staff"
 )
 
 func main() {
@@ -101,6 +102,51 @@ func main() {
 		rbacRoutes.GET("/roles/:id/permissions", rbacHandler.ListRolePermissions)
 		rbacRoutes.POST("/roles/:id/permissions", rbacHandler.AssignPermission)
 		rbacRoutes.DELETE("/roles/:id/permissions/:permission_id", rbacHandler.RevokePermission)
+	}
+
+	// Staff management (M6): the first real consumers of RequirePermission.
+	// All routes sit behind RequireAuth (the audit trail needs to know who
+	// acted); each group then gates on the specific staff.* permission code
+	// from section 11. staff.deactivate is deliberately stricter than
+	// staff.update — suspending someone's employment is a bigger deal than
+	// fixing their phone number.
+	staffService := staff.NewService(pool)
+	staffHandler := staff.NewHandler(staffService)
+
+	staffRoutes := v1.Group("")
+	staffRoutes.Use(auth.RequireAuth(authService, sessionCookieName))
+	{
+		viewStaff := staffRoutes.Group("")
+		viewStaff.Use(rbac.RequirePermission(rbacService, "staff.view"))
+		{
+			viewStaff.GET("/staff", staffHandler.ListStaff)
+			viewStaff.GET("/staff/:id", staffHandler.GetStaff)
+			viewStaff.GET("/departments", staffHandler.ListDepartments)
+			viewStaff.GET("/staff-positions", staffHandler.ListStaffPositions)
+		}
+
+		createStaff := staffRoutes.Group("")
+		createStaff.Use(rbac.RequirePermission(rbacService, "staff.create"))
+		{
+			createStaff.POST("/staff", staffHandler.CreateStaff)
+		}
+
+		updateStaff := staffRoutes.Group("")
+		updateStaff.Use(rbac.RequirePermission(rbacService, "staff.update"))
+		{
+			updateStaff.PATCH("/staff/:id", staffHandler.UpdateStaff)
+			updateStaff.PUT("/staff/:id/assignment", staffHandler.SetAssignment)
+			updateStaff.POST("/staff/:id/account", staffHandler.CreateAccount)
+			updateStaff.PUT("/staff/:id/account/roles", staffHandler.SetAccountRoles)
+			updateStaff.POST("/departments", staffHandler.CreateDepartment)
+			updateStaff.POST("/staff-positions", staffHandler.CreateStaffPosition)
+		}
+
+		deactivateStaff := staffRoutes.Group("")
+		deactivateStaff.Use(rbac.RequirePermission(rbacService, "staff.deactivate"))
+		{
+			deactivateStaff.PUT("/staff/:id/status", staffHandler.SetEmploymentStatus)
+		}
 	}
 
 	addr := ":" + cfg.Port
