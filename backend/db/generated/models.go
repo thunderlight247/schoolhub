@@ -27,6 +27,14 @@ type Department struct {
 	UpdatedAt   pgtype.Timestamptz `json:"updated_at"`
 }
 
+type Guardian struct {
+	ID         uuid.UUID          `json:"id"`
+	PersonID   uuid.UUID          `json:"person_id"`
+	Occupation pgtype.Text        `json:"occupation"`
+	CreatedAt  pgtype.Timestamptz `json:"created_at"`
+	UpdatedAt  pgtype.Timestamptz `json:"updated_at"`
+}
+
 type InvitationToken struct {
 	ID         uuid.UUID          `json:"id"`
 	PersonID   uuid.UUID          `json:"person_id"`
@@ -110,6 +118,24 @@ type StaffPosition struct {
 	Description pgtype.Text        `json:"description"`
 	CreatedAt   pgtype.Timestamptz `json:"created_at"`
 	UpdatedAt   pgtype.Timestamptz `json:"updated_at"`
+}
+
+type Student struct {
+	ID            uuid.UUID          `json:"id"`
+	PersonID      uuid.UUID          `json:"person_id"`
+	StudentNumber string             `json:"student_number"`
+	AdmissionDate pgtype.Date        `json:"admission_date"`
+	Status        string             `json:"status"`
+	CreatedAt     pgtype.Timestamptz `json:"created_at"`
+	UpdatedAt     pgtype.Timestamptz `json:"updated_at"`
+}
+
+type StudentGuardian struct {
+	ID           uuid.UUID          `json:"id"`
+	StudentID    uuid.UUID          `json:"student_id"`
+	GuardianID   uuid.UUID          `json:"guardian_id"`
+	Relationship string             `json:"relationship"`
+	CreatedAt    pgtype.Timestamptz `json:"created_at"`
 }
 
 type User struct {

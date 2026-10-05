@@ -27,6 +27,15 @@ const (
 	ActionStaffStatusChanged = "STAFF_STATUS_CHANGED"
 	ActionUserCreated        = "USER_CREATED"
 	ActionUserRolesUpdated   = "USER_ROLES_UPDATED"
+
+	// M7 — students and guardians.
+	ActionStudentCreated       = "STUDENT_CREATED"
+	ActionStudentUpdated       = "STUDENT_UPDATED"
+	ActionStudentStatusChanged = "STUDENT_STATUS_CHANGED"
+	ActionGuardianCreated      = "GUARDIAN_CREATED"
+	ActionGuardianUpdated      = "GUARDIAN_UPDATED"
+	ActionGuardianLinked       = "STUDENT_GUARDIAN_LINKED"
+	ActionGuardianUnlinked     = "STUDENT_GUARDIAN_UNLINKED"
 )
 
 // Resource types referenced by audit entries.
@@ -35,6 +44,10 @@ const (
 	ResourceUser          = "user"
 	ResourceDepartment    = "department"
 	ResourceStaffPosition = "staff_position"
+
+	// M7.
+	ResourceStudent  = "student"
+	ResourceGuardian = "guardian"
 )
 
 // Entry describes one auditable action. ActorUserID/ResourceID may be the

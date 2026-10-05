@@ -8,6 +8,7 @@ import (
 	"context"
 
 	"github.com/google/uuid"
+	"github.com/jackc/pgx/v5/pgtype"
 )
 
 type Querier interface {
@@ -16,19 +17,24 @@ type Querier interface {
 	// Used by the admin "replace a user's roles" flow (M6): the transaction
 	// deletes all current rows then re-assigns the requested set atomically.
 	ClearUserRoles(ctx context.Context, userID uuid.UUID) error
+	CountGuardians(ctx context.Context, search pgtype.Text) (int64, error)
 	// Must stay in sync with ListStaff's WHERE clause (see comment there).
 	CountStaff(ctx context.Context, arg CountStaffParams) (int64, error)
+	// Must stay in sync with ListStudents' WHERE clause.
+	CountStudents(ctx context.Context, arg CountStudentsParams) (int64, error)
 	// Append-only: no UPDATE/DELETE queries exist for this table by design
 	// (see migration 000006). Callers pass a tx-bound Querier so the audit
 	// row commits atomically with the mutation it describes.
 	CreateAuditLog(ctx context.Context, arg CreateAuditLogParams) error
 	CreateDepartment(ctx context.Context, arg CreateDepartmentParams) (Department, error)
+	CreateGuardian(ctx context.Context, arg CreateGuardianParams) (Guardian, error)
 	CreateInvitationToken(ctx context.Context, arg CreateInvitationTokenParams) (InvitationToken, error)
 	CreatePasswordResetToken(ctx context.Context, arg CreatePasswordResetTokenParams) (PasswordResetToken, error)
 	CreatePerson(ctx context.Context, arg CreatePersonParams) (Person, error)
 	CreateSession(ctx context.Context, arg CreateSessionParams) (Session, error)
 	CreateStaff(ctx context.Context, arg CreateStaffParams) (Staff, error)
 	CreateStaffPosition(ctx context.Context, arg CreateStaffPositionParams) (StaffPosition, error)
+	CreateStudent(ctx context.Context, arg CreateStudentParams) (Student, error)
 	CreateUser(ctx context.Context, arg CreateUserParams) (User, error)
 	// Used on password change (and by the admin "suspend user" action in M5) to
 	// force re-login everywhere, not just the current device.
@@ -40,6 +46,7 @@ type Querier interface {
 	DeleteExpiredSessions(ctx context.Context) error
 	DeleteSession(ctx context.Context, tokenHash string) error
 	GetDepartmentByID(ctx context.Context, id uuid.UUID) (Department, error)
+	GetGuardianByID(ctx context.Context, id uuid.UUID) (GetGuardianByIDRow, error)
 	GetInvitationTokenByHash(ctx context.Context, tokenHash string) (InvitationToken, error)
 	GetPasswordResetTokenByHash(ctx context.Context, tokenHash string) (PasswordResetToken, error)
 	GetPermissionByCode(ctx context.Context, code string) (Permission, error)
@@ -54,6 +61,7 @@ type Querier interface {
 	// struct for a LEFT JOINed users row.
 	GetStaffByID(ctx context.Context, id uuid.UUID) (GetStaffByIDRow, error)
 	GetStaffPositionByID(ctx context.Context, id uuid.UUID) (StaffPosition, error)
+	GetStudentByID(ctx context.Context, id uuid.UUID) (GetStudentByIDRow, error)
 	// The login lookup. Returns SUSPENDED/INACTIVE users too — M4's auth
 	// service is responsible for checking `status` before issuing a session,
 	// not this query (see fix(auth): prevent suspended users from logging in
@@ -61,7 +69,13 @@ type Querier interface {
 	GetUserByEmail(ctx context.Context, email string) (User, error)
 	GetUserByID(ctx context.Context, id uuid.UUID) (User, error)
 	GetUserByPersonID(ctx context.Context, personID uuid.UUID) (User, error)
+	LinkGuardianToStudent(ctx context.Context, arg LinkGuardianToStudentParams) (StudentGuardian, error)
 	ListDepartments(ctx context.Context) ([]Department, error)
+	// Backs the "search existing guardian to link" workflow as well as a
+	// standalone guardians directory. No status filter (guardians, unlike
+	// students/staff, have no archived/inactive state in this milestone).
+	ListGuardians(ctx context.Context, arg ListGuardiansParams) ([]ListGuardiansRow, error)
+	ListGuardiansForStudent(ctx context.Context, studentID uuid.UUID) ([]ListGuardiansForStudentRow, error)
 	ListPermissions(ctx context.Context) ([]Permission, error)
 	ListPermissionsForRole(ctx context.Context, roleID uuid.UUID) ([]Permission, error)
 	// Every permission the user holds across all of their roles, deduplicated.
@@ -77,6 +91,10 @@ type Querier interface {
 	// be correct.
 	ListStaff(ctx context.Context, arg ListStaffParams) ([]ListStaffRow, error)
 	ListStaffPositions(ctx context.Context) ([]StaffPosition, error)
+	// Paginated, filtered student list (section 25). Keep this WHERE clause
+	// and CountStudents' in sync — see the same note on ListStaff in staff.sql.
+	ListStudents(ctx context.Context, arg ListStudentsParams) ([]ListStudentsRow, error)
+	ListStudentsForGuardian(ctx context.Context, guardianID uuid.UUID) ([]ListStudentsForGuardianRow, error)
 	MarkInvitationTokenAccepted(ctx context.Context, id uuid.UUID) error
 	MarkPasswordResetTokenUsed(ctx context.Context, id uuid.UUID) error
 	RecordUserLogin(ctx context.Context, id uuid.UUID) error
@@ -86,6 +104,12 @@ type Querier interface {
 	// Pagination happens here at the query level, not in application code.
 	SearchPeopleByName(ctx context.Context, arg SearchPeopleByNameParams) ([]Person, error)
 	SetStaffEmploymentStatus(ctx context.Context, arg SetStaffEmploymentStatusParams) (Staff, error)
+	SetStudentStatus(ctx context.Context, arg SetStudentStatusParams) (Student, error)
+	// :execrows (not :exec) so the service can tell "unlinked something" from
+	// "that link didn't exist" and return a friendly 404 instead of a silent
+	// no-op 200.
+	UnlinkGuardianFromStudent(ctx context.Context, arg UnlinkGuardianFromStudentParams) (int64, error)
+	UpdateGuardianOccupation(ctx context.Context, arg UpdateGuardianOccupationParams) (Guardian, error)
 	UpdatePerson(ctx context.Context, arg UpdatePersonParams) (Person, error)
 	// The staff.update path: department, position, and hired date. Employment
 	// status is deliberately NOT set here — status changes go through

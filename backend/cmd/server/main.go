@@ -21,6 +21,7 @@ import (
 	"github.com/thunderlight247/schoolhub/backend/internal/database"
 	"github.com/thunderlight247/schoolhub/backend/internal/rbac"
 	"github.com/thunderlight247/schoolhub/backend/internal/staff"
+	"github.com/thunderlight247/schoolhub/backend/internal/students"
 )
 
 func main() {
@@ -146,6 +147,48 @@ func main() {
 		deactivateStaff.Use(rbac.RequirePermission(rbacService, "staff.deactivate"))
 		{
 			deactivateStaff.PUT("/staff/:id/status", staffHandler.SetEmploymentStatus)
+		}
+	}
+
+	// Students and guardians management (M7).
+	// All routes sit behind RequireAuth; each group gates on the specific
+	// student.* permission code. Guardians reuse the student.* permissions
+	// (section 11 has no separate guardian.* codes).
+	studentService := students.NewService(pool)
+	studentHandler := students.NewHandler(studentService)
+
+	studentRoutes := v1.Group("")
+	studentRoutes.Use(auth.RequireAuth(authService, sessionCookieName))
+	{
+		viewStudents := studentRoutes.Group("")
+		viewStudents.Use(rbac.RequirePermission(rbacService, "student.view"))
+		{
+			viewStudents.GET("/students", studentHandler.ListStudents)
+			viewStudents.GET("/students/:id", studentHandler.GetStudent)
+			viewStudents.GET("/guardians", studentHandler.ListGuardians)
+			viewStudents.GET("/guardians/:id", studentHandler.GetGuardian)
+		}
+
+		createStudents := studentRoutes.Group("")
+		createStudents.Use(rbac.RequirePermission(rbacService, "student.create"))
+		{
+			createStudents.POST("/students", studentHandler.CreateStudent)
+			createStudents.POST("/guardians", studentHandler.CreateGuardian)
+		}
+
+		updateStudents := studentRoutes.Group("")
+		updateStudents.Use(rbac.RequirePermission(rbacService, "student.update"))
+		{
+			updateStudents.PATCH("/students/:id", studentHandler.UpdateStudent)
+			updateStudents.POST("/students/:id/guardians", studentHandler.LinkGuardian)
+			updateStudents.DELETE("/students/:id/guardians/:guardian_id", studentHandler.UnlinkGuardian)
+			updateStudents.PATCH("/guardians/:id", studentHandler.UpdateGuardian)
+		}
+
+		archiveStudents := studentRoutes.Group("")
+		archiveStudents.Use(rbac.RequirePermission(rbacService, "student.archive"))
+		{
+			archiveStudents.PUT("/students/:id/status", studentHandler.SetStudentStatus)
 		}
 	}
 
