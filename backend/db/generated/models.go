@@ -9,6 +9,16 @@ import (
 	"github.com/jackc/pgx/v5/pgtype"
 )
 
+type AcademicYear struct {
+	ID        uuid.UUID          `json:"id"`
+	Name      string             `json:"name"`
+	StartDate pgtype.Date        `json:"start_date"`
+	EndDate   pgtype.Date        `json:"end_date"`
+	IsCurrent bool               `json:"is_current"`
+	CreatedAt pgtype.Timestamptz `json:"created_at"`
+	UpdatedAt pgtype.Timestamptz `json:"updated_at"`
+}
+
 type AuditLog struct {
 	ID           uuid.UUID          `json:"id"`
 	ActorUserID  pgtype.UUID        `json:"actor_user_id"`
@@ -17,6 +27,24 @@ type AuditLog struct {
 	ResourceID   pgtype.UUID        `json:"resource_id"`
 	Metadata     []byte             `json:"metadata"`
 	CreatedAt    pgtype.Timestamptz `json:"created_at"`
+}
+
+type Class struct {
+	ID             uuid.UUID          `json:"id"`
+	AcademicYearID uuid.UUID          `json:"academic_year_id"`
+	ProgrammeID    pgtype.UUID        `json:"programme_id"`
+	Name           string             `json:"name"`
+	Level          pgtype.Text        `json:"level"`
+	Capacity       pgtype.Int4        `json:"capacity"`
+	CreatedAt      pgtype.Timestamptz `json:"created_at"`
+	UpdatedAt      pgtype.Timestamptz `json:"updated_at"`
+}
+
+type ClassSubject struct {
+	ID        uuid.UUID          `json:"id"`
+	ClassID   uuid.UUID          `json:"class_id"`
+	SubjectID uuid.UUID          `json:"subject_id"`
+	CreatedAt pgtype.Timestamptz `json:"created_at"`
 }
 
 type Department struct {
@@ -73,6 +101,15 @@ type Person struct {
 	Phone       pgtype.Text        `json:"phone"`
 	Email       pgtype.Text        `json:"email"`
 	Address     pgtype.Text        `json:"address"`
+	CreatedAt   pgtype.Timestamptz `json:"created_at"`
+	UpdatedAt   pgtype.Timestamptz `json:"updated_at"`
+}
+
+type Programme struct {
+	ID          uuid.UUID          `json:"id"`
+	Code        string             `json:"code"`
+	Name        string             `json:"name"`
+	Description pgtype.Text        `json:"description"`
 	CreatedAt   pgtype.Timestamptz `json:"created_at"`
 	UpdatedAt   pgtype.Timestamptz `json:"updated_at"`
 }
@@ -136,6 +173,28 @@ type StudentGuardian struct {
 	GuardianID   uuid.UUID          `json:"guardian_id"`
 	Relationship string             `json:"relationship"`
 	CreatedAt    pgtype.Timestamptz `json:"created_at"`
+}
+
+type Subject struct {
+	ID           uuid.UUID          `json:"id"`
+	Code         string             `json:"code"`
+	Name         string             `json:"name"`
+	Description  pgtype.Text        `json:"description"`
+	Type         string             `json:"type"`
+	DepartmentID pgtype.UUID        `json:"department_id"`
+	CreatedAt    pgtype.Timestamptz `json:"created_at"`
+	UpdatedAt    pgtype.Timestamptz `json:"updated_at"`
+}
+
+type Term struct {
+	ID             uuid.UUID          `json:"id"`
+	AcademicYearID uuid.UUID          `json:"academic_year_id"`
+	Name           string             `json:"name"`
+	StartDate      pgtype.Date        `json:"start_date"`
+	EndDate        pgtype.Date        `json:"end_date"`
+	IsCurrent      bool               `json:"is_current"`
+	CreatedAt      pgtype.Timestamptz `json:"created_at"`
+	UpdatedAt      pgtype.Timestamptz `json:"updated_at"`
 }
 
 type User struct {

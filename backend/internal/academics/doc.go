@@ -1,4 +1,5 @@
-// Package academics will hold the academics domain (HTTP handlers, service/business logic,
-// and repository/sqlc-backed data access) starting from a later milestone.
-// It is intentionally empty at Milestone 0.
+// Package academics implements the academic structure domain (milestone M8):
+// academic years, terms, programmes, subjects, and classes with class-subject
+// associations. It provides the institutional foundation required before
+// student enrollment (M9) and teacher assignments (M10).
 package academics

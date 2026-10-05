@@ -36,6 +36,22 @@ const (
 	ActionGuardianUpdated      = "GUARDIAN_UPDATED"
 	ActionGuardianLinked       = "STUDENT_GUARDIAN_LINKED"
 	ActionGuardianUnlinked     = "STUDENT_GUARDIAN_UNLINKED"
+
+	// M8 — academic structure.
+	ActionAcademicYearCreated    = "ACADEMIC_YEAR_CREATED"
+	ActionAcademicYearUpdated    = "ACADEMIC_YEAR_UPDATED"
+	ActionAcademicYearSetCurrent = "ACADEMIC_YEAR_SET_CURRENT"
+	ActionTermCreated            = "TERM_CREATED"
+	ActionTermUpdated            = "TERM_UPDATED"
+	ActionTermSetCurrent         = "TERM_SET_CURRENT"
+	ActionProgrammeCreated       = "PROGRAMME_CREATED"
+	ActionProgrammeUpdated       = "PROGRAMME_UPDATED"
+	ActionSubjectCreated         = "SUBJECT_CREATED"
+	ActionSubjectUpdated         = "SUBJECT_UPDATED"
+	ActionClassCreated           = "CLASS_CREATED"
+	ActionClassUpdated           = "CLASS_UPDATED"
+	ActionClassSubjectAssigned   = "CLASS_SUBJECT_ASSIGNED"
+	ActionClassSubjectRemoved    = "CLASS_SUBJECT_REMOVED"
 )
 
 // Resource types referenced by audit entries.
@@ -48,6 +64,13 @@ const (
 	// M7.
 	ResourceStudent  = "student"
 	ResourceGuardian = "guardian"
+
+	// M8.
+	ResourceAcademicYear = "academic_year"
+	ResourceTerm         = "term"
+	ResourceProgramme    = "programme"
+	ResourceSubject      = "subject"
+	ResourceClass        = "class"
 )
 
 // Entry describes one auditable action. ActorUserID/ResourceID may be the

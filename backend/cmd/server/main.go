@@ -17,6 +17,7 @@ import (
 
 	"github.com/thunderlight247/schoolhub/backend/config"
 	db "github.com/thunderlight247/schoolhub/backend/db/generated"
+	"github.com/thunderlight247/schoolhub/backend/internal/academics"
 	"github.com/thunderlight247/schoolhub/backend/internal/auth"
 	"github.com/thunderlight247/schoolhub/backend/internal/database"
 	"github.com/thunderlight247/schoolhub/backend/internal/rbac"
@@ -189,6 +190,66 @@ func main() {
 		archiveStudents.Use(rbac.RequirePermission(rbacService, "student.archive"))
 		{
 			archiveStudents.PUT("/students/:id/status", studentHandler.SetStudentStatus)
+		}
+	}
+
+	// Academic structure management (M8).
+	// Gated on class.view (read), class.create (create), and class.update (mutate/assign).
+	academicsService := academics.NewService(pool)
+	academicsHandler := academics.NewHandler(academicsService)
+
+	academicRoutes := v1.Group("")
+	academicRoutes.Use(auth.RequireAuth(authService, sessionCookieName))
+	{
+		viewAcademics := academicRoutes.Group("")
+		viewAcademics.Use(rbac.RequirePermission(rbacService, "class.view"))
+		{
+			// Academic Years
+			viewAcademics.GET("/academic-years", academicsHandler.ListAcademicYears)
+			viewAcademics.GET("/academic-years/current", academicsHandler.GetCurrentAcademicYear)
+			viewAcademics.GET("/academic-years/:id", academicsHandler.GetAcademicYear)
+
+			// Terms
+			viewAcademics.GET("/terms", academicsHandler.ListTerms)
+			viewAcademics.GET("/terms/current", academicsHandler.GetCurrentTerm)
+			viewAcademics.GET("/terms/:id", academicsHandler.GetTerm)
+
+			// Programmes
+			viewAcademics.GET("/programmes", academicsHandler.ListProgrammes)
+			viewAcademics.GET("/programmes/:id", academicsHandler.GetProgramme)
+
+			// Subjects
+			viewAcademics.GET("/subjects", academicsHandler.ListSubjects)
+			viewAcademics.GET("/subjects/:id", academicsHandler.GetSubject)
+
+			// Classes
+			viewAcademics.GET("/classes", academicsHandler.ListClasses)
+			viewAcademics.GET("/classes/:id", academicsHandler.GetClass)
+			viewAcademics.GET("/classes/:id/subjects", academicsHandler.ListSubjectsForClass)
+		}
+
+		createAcademics := academicRoutes.Group("")
+		createAcademics.Use(rbac.RequirePermission(rbacService, "class.create"))
+		{
+			createAcademics.POST("/academic-years", academicsHandler.CreateAcademicYear)
+			createAcademics.POST("/terms", academicsHandler.CreateTerm)
+			createAcademics.POST("/programmes", academicsHandler.CreateProgramme)
+			createAcademics.POST("/subjects", academicsHandler.CreateSubject)
+			createAcademics.POST("/classes", academicsHandler.CreateClass)
+		}
+
+		updateAcademics := academicRoutes.Group("")
+		updateAcademics.Use(rbac.RequirePermission(rbacService, "class.update"))
+		{
+			updateAcademics.PATCH("/academic-years/:id", academicsHandler.UpdateAcademicYear)
+			updateAcademics.PUT("/academic-years/:id/current", academicsHandler.SetCurrentAcademicYear)
+			updateAcademics.PATCH("/terms/:id", academicsHandler.UpdateTerm)
+			updateAcademics.PUT("/terms/:id/current", academicsHandler.SetCurrentTerm)
+			updateAcademics.PATCH("/programmes/:id", academicsHandler.UpdateProgramme)
+			updateAcademics.PATCH("/subjects/:id", academicsHandler.UpdateSubject)
+			updateAcademics.PATCH("/classes/:id", academicsHandler.UpdateClass)
+			updateAcademics.POST("/classes/:id/subjects", academicsHandler.AssignSubjectToClass)
+			updateAcademics.DELETE("/classes/:id/subjects/:subject_id", academicsHandler.RemoveSubjectFromClass)
 		}
 	}
 

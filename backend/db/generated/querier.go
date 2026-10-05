@@ -14,6 +14,7 @@ import (
 type Querier interface {
 	AssignPermissionToRole(ctx context.Context, arg AssignPermissionToRoleParams) error
 	AssignRoleToUser(ctx context.Context, arg AssignRoleToUserParams) error
+	AssignSubjectToClass(ctx context.Context, arg AssignSubjectToClassParams) (ClassSubject, error)
 	// Used by the admin "replace a user's roles" flow (M6): the transaction
 	// deletes all current rows then re-assigns the requested set atomically.
 	ClearUserRoles(ctx context.Context, userID uuid.UUID) error
@@ -22,19 +23,24 @@ type Querier interface {
 	CountStaff(ctx context.Context, arg CountStaffParams) (int64, error)
 	// Must stay in sync with ListStudents' WHERE clause.
 	CountStudents(ctx context.Context, arg CountStudentsParams) (int64, error)
+	CreateAcademicYear(ctx context.Context, arg CreateAcademicYearParams) (AcademicYear, error)
 	// Append-only: no UPDATE/DELETE queries exist for this table by design
 	// (see migration 000006). Callers pass a tx-bound Querier so the audit
 	// row commits atomically with the mutation it describes.
 	CreateAuditLog(ctx context.Context, arg CreateAuditLogParams) error
+	CreateClass(ctx context.Context, arg CreateClassParams) (Class, error)
 	CreateDepartment(ctx context.Context, arg CreateDepartmentParams) (Department, error)
 	CreateGuardian(ctx context.Context, arg CreateGuardianParams) (Guardian, error)
 	CreateInvitationToken(ctx context.Context, arg CreateInvitationTokenParams) (InvitationToken, error)
 	CreatePasswordResetToken(ctx context.Context, arg CreatePasswordResetTokenParams) (PasswordResetToken, error)
 	CreatePerson(ctx context.Context, arg CreatePersonParams) (Person, error)
+	CreateProgramme(ctx context.Context, arg CreateProgrammeParams) (Programme, error)
 	CreateSession(ctx context.Context, arg CreateSessionParams) (Session, error)
 	CreateStaff(ctx context.Context, arg CreateStaffParams) (Staff, error)
 	CreateStaffPosition(ctx context.Context, arg CreateStaffPositionParams) (StaffPosition, error)
 	CreateStudent(ctx context.Context, arg CreateStudentParams) (Student, error)
+	CreateSubject(ctx context.Context, arg CreateSubjectParams) (Subject, error)
+	CreateTerm(ctx context.Context, arg CreateTermParams) (Term, error)
 	CreateUser(ctx context.Context, arg CreateUserParams) (User, error)
 	// Used on password change (and by the admin "suspend user" action in M5) to
 	// force re-login everywhere, not just the current device.
@@ -45,12 +51,18 @@ type Querier interface {
 	// regardless; this just reclaims the rows.
 	DeleteExpiredSessions(ctx context.Context) error
 	DeleteSession(ctx context.Context, tokenHash string) error
+	GetAcademicYearByID(ctx context.Context, id uuid.UUID) (AcademicYear, error)
+	GetClassByID(ctx context.Context, id uuid.UUID) (GetClassByIDRow, error)
+	GetCurrentAcademicYear(ctx context.Context) (AcademicYear, error)
+	GetCurrentTerm(ctx context.Context) (GetCurrentTermRow, error)
 	GetDepartmentByID(ctx context.Context, id uuid.UUID) (Department, error)
 	GetGuardianByID(ctx context.Context, id uuid.UUID) (GetGuardianByIDRow, error)
 	GetInvitationTokenByHash(ctx context.Context, tokenHash string) (InvitationToken, error)
 	GetPasswordResetTokenByHash(ctx context.Context, tokenHash string) (PasswordResetToken, error)
 	GetPermissionByCode(ctx context.Context, code string) (Permission, error)
 	GetPersonByID(ctx context.Context, id uuid.UUID) (Person, error)
+	GetProgrammeByCode(ctx context.Context, code string) (Programme, error)
+	GetProgrammeByID(ctx context.Context, id uuid.UUID) (Programme, error)
 	GetRoleByID(ctx context.Context, id uuid.UUID) (Role, error)
 	GetRoleByName(ctx context.Context, name string) (Role, error)
 	GetSessionByTokenHash(ctx context.Context, tokenHash string) (Session, error)
@@ -62,6 +74,9 @@ type Querier interface {
 	GetStaffByID(ctx context.Context, id uuid.UUID) (GetStaffByIDRow, error)
 	GetStaffPositionByID(ctx context.Context, id uuid.UUID) (StaffPosition, error)
 	GetStudentByID(ctx context.Context, id uuid.UUID) (GetStudentByIDRow, error)
+	GetSubjectByCode(ctx context.Context, code string) (Subject, error)
+	GetSubjectByID(ctx context.Context, id uuid.UUID) (GetSubjectByIDRow, error)
+	GetTermByID(ctx context.Context, id uuid.UUID) (GetTermByIDRow, error)
 	// The login lookup. Returns SUSPENDED/INACTIVE users too — M4's auth
 	// service is responsible for checking `status` before issuing a session,
 	// not this query (see fix(auth): prevent suspended users from logging in
@@ -70,6 +85,9 @@ type Querier interface {
 	GetUserByID(ctx context.Context, id uuid.UUID) (User, error)
 	GetUserByPersonID(ctx context.Context, personID uuid.UUID) (User, error)
 	LinkGuardianToStudent(ctx context.Context, arg LinkGuardianToStudentParams) (StudentGuardian, error)
+	ListAcademicYears(ctx context.Context) ([]AcademicYear, error)
+	ListAllTerms(ctx context.Context) ([]ListAllTermsRow, error)
+	ListClasses(ctx context.Context, arg ListClassesParams) ([]ListClassesRow, error)
 	ListDepartments(ctx context.Context) ([]Department, error)
 	// Backs the "search existing guardian to link" workflow as well as a
 	// standalone guardians directory. No status filter (guardians, unlike
@@ -82,6 +100,7 @@ type Querier interface {
 	// Section 11: "The backend must enforce authorization" — this is the query
 	// the auth middleware will call to build a user's effective permission set.
 	ListPermissionsForUser(ctx context.Context, userID uuid.UUID) ([]Permission, error)
+	ListProgrammes(ctx context.Context) ([]Programme, error)
 	ListRoles(ctx context.Context) ([]Role, error)
 	ListRolesForUser(ctx context.Context, userID uuid.UUID) ([]Role, error)
 	// Paginated, filtered staff list (section 25). Filtering happens here at
@@ -95,27 +114,40 @@ type Querier interface {
 	// and CountStudents' in sync — see the same note on ListStaff in staff.sql.
 	ListStudents(ctx context.Context, arg ListStudentsParams) ([]ListStudentsRow, error)
 	ListStudentsForGuardian(ctx context.Context, guardianID uuid.UUID) ([]ListStudentsForGuardianRow, error)
+	ListSubjects(ctx context.Context, arg ListSubjectsParams) ([]ListSubjectsRow, error)
+	ListSubjectsForClass(ctx context.Context, classID uuid.UUID) ([]ListSubjectsForClassRow, error)
+	ListTermsForAcademicYear(ctx context.Context, academicYearID uuid.UUID) ([]ListTermsForAcademicYearRow, error)
 	MarkInvitationTokenAccepted(ctx context.Context, id uuid.UUID) error
 	MarkPasswordResetTokenUsed(ctx context.Context, id uuid.UUID) error
 	RecordUserLogin(ctx context.Context, id uuid.UUID) error
+	RemoveSubjectFromClass(ctx context.Context, arg RemoveSubjectFromClassParams) (int64, error)
 	RevokePermissionFromRole(ctx context.Context, arg RevokePermissionFromRoleParams) error
 	RevokeRoleFromUser(ctx context.Context, arg RevokeRoleFromUserParams) error
 	// Backs the admin "search students/staff by name" screens (section 25).
 	// Pagination happens here at the query level, not in application code.
 	SearchPeopleByName(ctx context.Context, arg SearchPeopleByNameParams) ([]Person, error)
+	SetAcademicYearCurrent(ctx context.Context, id uuid.UUID) (AcademicYear, error)
 	SetStaffEmploymentStatus(ctx context.Context, arg SetStaffEmploymentStatusParams) (Staff, error)
 	SetStudentStatus(ctx context.Context, arg SetStudentStatusParams) (Student, error)
+	SetTermCurrent(ctx context.Context, id uuid.UUID) (Term, error)
 	// :execrows (not :exec) so the service can tell "unlinked something" from
 	// "that link didn't exist" and return a friendly 404 instead of a silent
 	// no-op 200.
 	UnlinkGuardianFromStudent(ctx context.Context, arg UnlinkGuardianFromStudentParams) (int64, error)
+	UnsetCurrentAcademicYears(ctx context.Context) error
+	UnsetCurrentTerms(ctx context.Context) error
+	UpdateAcademicYear(ctx context.Context, arg UpdateAcademicYearParams) (AcademicYear, error)
+	UpdateClass(ctx context.Context, arg UpdateClassParams) (Class, error)
 	UpdateGuardianOccupation(ctx context.Context, arg UpdateGuardianOccupationParams) (Guardian, error)
 	UpdatePerson(ctx context.Context, arg UpdatePersonParams) (Person, error)
+	UpdateProgramme(ctx context.Context, arg UpdateProgrammeParams) (Programme, error)
 	// The staff.update path: department, position, and hired date. Employment
 	// status is deliberately NOT set here — status changes go through
 	// SetStaffEmploymentStatus so they can carry the staff.deactivate
 	// permission and their own audit event.
 	UpdateStaffAssignment(ctx context.Context, arg UpdateStaffAssignmentParams) (Staff, error)
+	UpdateSubject(ctx context.Context, arg UpdateSubjectParams) (Subject, error)
+	UpdateTerm(ctx context.Context, arg UpdateTermParams) (Term, error)
 	UpdateUserPasswordHash(ctx context.Context, arg UpdateUserPasswordHashParams) error
 	UpdateUserStatus(ctx context.Context, arg UpdateUserStatusParams) error
 	// A single boolean check, cheaper than fetching the full permission list

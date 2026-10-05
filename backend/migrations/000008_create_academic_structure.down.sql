@@ -1,0 +1,6 @@
+DROP TABLE IF EXISTS class_subjects;
+DROP TABLE IF EXISTS classes;
+DROP TABLE IF EXISTS subjects;
+DROP TABLE IF EXISTS programmes;
+DROP TABLE IF EXISTS terms;
+DROP TABLE IF EXISTS academic_years;
