@@ -1,16 +1,32 @@
 # SchoolHub
 
-A full-stack school administration & management portal, built as a portfolio
-prototype demonstrating practical software engineering: Next.js/TypeScript on
-the frontend, Go on the backend, PostgreSQL for storage.
+A full-stack school administration & management portal built as a portfolio
+project that demonstrates practical engineering: Next.js + TypeScript on the
+frontend, Go on the backend, and PostgreSQL for persistence.
 
-> **Status:** Milestone 5 — RBAC/permissions. Project scaffolding, PostgreSQL
-> migrations, the sqlc data layer, session authentication, and permission-based
-> authorization are implemented and verified. Domain modules (staff, students,
-> academics, attendance, results, ...) arrive in later milestones.
+> Status: Milestone 8 — Academic structure is implemented and ready for
+> verification. The project now includes the identity/RBAC foundation,
+> auth, the M6 staff domain, M7 students/guardians domain, and M8 academic structure.
 
 **This is a personal portfolio/recruitment project.** It is not commissioned,
 endorsed, or used by any specific school, and it contains fictional data only.
+
+## Current project state
+
+The repository is now at the end of M8. The codebase includes:
+
+- project scaffolding and local container setup
+- migrations from 000001 through 000008
+- sqlc-generated database access code
+- authentication and session management
+- admin RBAC and permission enforcement
+- staff management, reference data, and audit log writes for mutations
+- students and guardians: registration, search/filter, edit, archive, and
+  guardian linking, all audit-logged
+- academic structure: academic years, terms, programmes, subjects, classes,
+  and class-subject assignments
+
+The next planned milestone is M9: enrollment.
 
 ## Architecture
 
@@ -24,30 +40,37 @@ Go REST API        (backend/)
 PostgreSQL
 ```
 
-A modular monolith: one Go binary, organized into internal domain packages
-(`backend/internal/*`), talking to one PostgreSQL database. No microservices,
-no message queues, no Kubernetes — see `docs/decisions.md` (added in a later
-milestone) for the reasoning.
+This is a modular monolith: one Go binary, organized into domain packages under
+`backend/internal/*`, backed by a single PostgreSQL database.
 
 ## Repository layout
 
 ```
 schoolhub/
-├── frontend/        Next.js (App Router) + TypeScript + Tailwind CSS
-├── backend/          Go REST API (Gin, pgx, sqlc — sqlc wired in M3)
-│   ├── cmd/server/    main.go — entrypoint
-│   ├── internal/      one package per domain (students, staff, attendance, ...)
-│   ├── db/            sqlc queries + generated code (regenerate as domains grow)
-│   ├── migrations/     handwritten SQL migrations (versions 000001–000004)
-│   └── config/         environment-variable loading
-├── docker-compose.yml  Postgres + backend for local development
-└── docs/               architecture/database/API docs (added in M24)
+├── frontend/         Next.js (App Router) + TypeScript + Tailwind CSS
+├── backend/          Go REST API (Gin, pgx, sqlc)
+│   ├── cmd/server/   main.go — API entrypoint
+│   ├── internal/     domain packages: auth, rbac, staff, students, audit, etc.
+│   ├── db/           sqlc queries and generated Go models
+│   ├── migrations/   SQL migrations (000001–000007)
+│   ├── config/      environment/config loading
+│   └── cmd/seed      temporary demo user seeding
+├── docker-compose.yml
+├── docs/
+├── README.md
+├── remember.md
+└── .env.example
 ```
 
-## Prerequisites (local machine, not this sandbox)
+Note: `internal/guardians/` (stubbed at project init) is removed as of M7 —
+guardians are implemented inside `internal/students` instead. See migration
+000007's comment for why (same reasoning M6 used to fold departments and
+staff positions into `internal/staff`).
 
-- Node.js 20+ and npm
-- Go 1.23+
+## Prerequisites
+
+- Node.js 20+
+- Go 1.22+
 - Docker and Docker Compose
 - Git
 
@@ -56,12 +79,12 @@ schoolhub/
 ```bash
 git clone <your-repo-url> schoolhub
 cd schoolhub
-cp .env.example .env          # adjust if needed
+cp .env.example .env
 
-# 1. Start Postgres + backend
+# Start core services
 docker compose up --build
 
-# 2. In a separate terminal, start the frontend
+# Start the frontend in a second terminal
 cd frontend
 cp .env.local.example .env.local
 npm install
@@ -70,167 +93,247 @@ npm run dev
 
 Then:
 
-- Backend health check: http://localhost:8080/api/v1/health → `{"status":"ok","database":"connected"}`
+- Backend health: http://localhost:8080/api/v1/health
 - Frontend: http://localhost:3000
 
-## Database migrations
+## Migrations and generated code
 
-Handwritten SQL migrations live in `backend/migrations/`, named
-`<version>_<description>.up.sql` / `.down.sql` (golang-migrate convention).
-No local `migrate` CLI install is required — a `migrate` service in
-`docker-compose.yml` runs the official image against `postgres` on demand:
+The app uses handwritten SQL migrations in `backend/migrations/` and sqlc for
+Go models and query wrappers under `backend/db/generated/`.
+
+Current migration stack:
+
+- 000001: pgcrypto + shared DB helper trigger
+- 000002: identity and RBAC tables
+- 000003: sessions and token tables
+- 000004: default role-to-permission mappings
+- 000005: departments, staff positions, and staff
+- 000006: audit logs
+- 000007: students, guardians, and student_guardians
+- 000008: academic structure (academic_years, terms, programmes, subjects, classes, class_subjects)
+- 000009: enrollment history
+- 000010: teacher assignments
+
+To apply them:
 
 ```bash
-docker compose up -d postgres        # make sure Postgres is running first
-docker compose run --rm migrate up   # apply all migrations
+docker compose up -d postgres
+docker compose run --rm migrate up
 docker compose run --rm migrate version
-docker compose run --rm migrate down 1   # roll back one migration
 ```
 
-Current migrations:
+If you change SQL or schema files, regenerate database bindings:
 
-| Version | Description                        |
-|---------|-------------------------------------|
-| 000001  | `pgcrypto` extension + shared `set_updated_at()` trigger function |
-| 000002  | Identity & RBAC: `people`, `users`, `roles`, `permissions`, `role_permissions`, `user_roles` — seeded with the 5 roles and the permission codes from the spec |
-| 000003  | Authentication: `sessions`, `password_reset_tokens`, `invitation_tokens` |
-| 000004  | Default role → permission mapping (ADMIN: all 26 permissions; TEACHER: class-scoped set; STAFF: limited admin; PARENT/STUDENT: view-only) |
+```bash
+docker compose run --rm sqlc generate
+```
 
-Domain-specific tables (staff, students, academics, attendance, assessments,
-announcements, audit logs) are added in their own migrations in later
-milestones (M6–M13, M19), not all at once.
+## Authentication and authorization
 
-If you'd rather install the CLI locally instead of using Docker:
-[github.com/golang-migrate/migrate/tree/master/cmd/migrate](https://github.com/golang-migrate/migrate/tree/master/cmd/migrate),
-then run `migrate -path backend/migrations -database "$DATABASE_URL" up`.
+The backend currently supports:
 
-## Authentication & authorization (M4–M5)
+- login/logout with the `schoolhub_session` cookie
+- session validation and auth middleware
+- role-based access checks
+- permission-gated business routes
 
-Authentication uses opaque session tokens: the client holds a random
-256-bit token in an httpOnly cookie (`schoolhub_session`); the server
-stores only its SHA-256 hash. Passwords are hashed with Argon2id.
-Suspended/inactive accounts are rejected at login and at every session
-validation.
-
-| Method | Path                  | Auth required |
-|--------|-----------------------|---------------|
-| POST   | `/api/v1/auth/login`  | no |
-| POST   | `/api/v1/auth/logout` | no (harmless if already logged out) |
-| GET    | `/api/v1/me`          | yes |
-| GET    | `/api/v1/roles`       | yes + ADMIN role |
-| GET    | `/api/v1/permissions` | yes + ADMIN role |
-| GET    | `/api/v1/roles/:id/permissions` | yes + ADMIN role |
-| POST   | `/api/v1/roles/:id/permissions` | yes + ADMIN role |
-| DELETE | `/api/v1/roles/:id/permissions/:permission_id` | yes + ADMIN role |
-
-`/me` and the login response include the caller's `roles` and effective
-`permissions` (resolved through `user_roles` → `role_permissions`) so the
-frontend can render role-aware navigation. That data is informational —
-enforcement is always server-side via the `rbac.RequirePermission(code)`
-middleware that domain routes (M6+) will be gated with. Assigning/revoking
-permissions on roles is done through the endpoints above; the assign and
-revoke operations are idempotent.
-
-### Creating dev users (temporary seed command)
+Demo users for local development:
 
 ```bash
 cd backend
-go run ./cmd/seed -role ADMIN   -email admin@schoolhub.test   -password "ChangeMe123!"
+go run ./cmd/seed -role ADMIN -email admin@schoolhub.test -password "ChangeMe123!"
 go run ./cmd/seed -role TEACHER -email teacher@schoolhub.test -password "ChangeMe123!"
 ```
 
-DEV ONLY — this stopgap exists so the auth/RBAC flow can be exercised
-before the real admin-driven account creation (M6) exists, and will be
-deleted once M6 provides it. These are fictional demo credentials.
+These are fictional dev credentials and are meant for local testing only.
 
-## Generated database layer (sqlc)
+## Current M6 feature set
 
-`backend/db/queries/*.sql` holds handwritten, annotated SQL queries;
-`backend/sqlc.yaml` tells [sqlc](https://sqlc.dev) to generate type-safe Go
-code from those queries plus the schema in `backend/migrations/*.up.sql`,
-into `backend/db/generated/`. Generated code is committed to the repo (not
-gitignored) so it's reviewable without installing sqlc.
+The M6 work includes:
 
-No local sqlc install needed — same pattern as migrations, via Docker:
+- departments and staff positions reference data
+- staff creation and lookup
+- staff assignment metadata and employment status updates
+- account creation for staff members and role assignment
+- audit rows written as part of each mutation transaction
+- permission-gated staff routes in `cmd/server/main.go`
+
+## Current M7 feature set
+
+The M7 work includes:
+
+- student registration, search/filter, profile view, person-field edit,
+  and archive/reactivate (section 14)
+- guardian registration, search, profile view, and person-field/occupation
+  edit, standalone from any particular student (section 15)
+- linking and unlinking an existing guardian to/from a student, with a
+  free-text relationship label (a student may have multiple guardians —
+  "one student = one parent" is not assumed)
+- audit rows written as part of each mutation transaction, same pattern as
+  M6: `STUDENT_CREATED`, `STUDENT_UPDATED`, `STUDENT_STATUS_CHANGED`,
+  `GUARDIAN_CREATED`, `GUARDIAN_UPDATED`, `STUDENT_GUARDIAN_LINKED`,
+  `STUDENT_GUARDIAN_UNLINKED`
+- permission-gated student/guardian routes in `cmd/server/main.go`, reusing
+  the four `student.*` permission codes from section 11 for guardians too
+  (section 11 has no separate `guardian.*` codes)
+
+Not in M7, deliberately: no class/enrollment link on students (that's
+M9's `enrollments` table — section 14 explicitly says not to put a
+permanent class field on the student record), and no guardian login/portal
+## Current M8 feature set
+
+The M8 work includes:
+
+- academic years: institutional academic calendars, date bounds validation,
+  and active year toggling (`ACADEMIC_YEAR_CREATED`, `ACADEMIC_YEAR_UPDATED`,
+  `ACADEMIC_YEAR_SET_CURRENT`)
+- terms/semesters: academic subdivisions scoped to academic years, with
+  unique term names per year and active term management (`TERM_CREATED`,
+  `TERM_UPDATED`, `TERM_SET_CURRENT`)
+- programmes: academic curriculum streams/tracks with unique codes and names
+  (`PROGRAMME_CREATED`, `PROGRAMME_UPDATED`)
+- subjects: institutional subject catalog categorized by Core or Elective,
+  optionally mapped to departments (`SUBJECT_CREATED`, `SUBJECT_UPDATED`)
+- classes: student cohort classrooms tied to an academic year and programme,
+  with capacity controls and uniqueness guarantees (`CLASS_CREATED`, `CLASS_UPDATED`)
+- class-subject assignments: curriculum mapping specifying which subjects are
+  taught in which class (`CLASS_SUBJECT_ASSIGNED`, `CLASS_SUBJECT_REMOVED`)
+- full audit logging across all mutations executed inside atomic transactions
+- permission gating wired to `class.view`, `class.create`, and `class.update`
+
+Key API areas:
+
+- `/api/v1/staff`
+- `/api/v1/departments`
+- `/api/v1/staff-positions`
+- `/api/v1/students`
+- `/api/v1/students/:id/guardians`
+- `/api/v1/guardians`
+- `/api/v1/academic-years`
+- `/api/v1/academic-years/current`
+- `/api/v1/terms`
+- `/api/v1/terms/current`
+- `/api/v1/programmes`
+- `/api/v1/subjects`
+- `/api/v1/classes`
+- `/api/v1/classes/:id/subjects`
+- `/api/v1/enrollments`
+- `/api/v1/teacher-assignments`
+- `/api/v1/auth/*`
+- `/api/v1/roles` and `/api/v1/permissions` (admin-only)
+
+## Current M9 feature set
+
+The M9 work includes:
+
+- enrollment history records that separate student identity from class membership
+- enrollment creation tied to a student, academic year, and class
+- duplication protection for active enrollments in the same academic year
+- status transitions for ENROLLED, COMPLETED, TRANSFERRED, and WITHDRAWN
+- audit rows written as part of each enrollment mutation transaction
+- permission-gated enrollment routes under the existing class-view/create/update checks
+
+Key API areas:
+
+- `/api/v1/enrollments`
+- `/api/v1/students/:id/enrollments`
+- `/api/v1/enrollments/:id`
+- `/api/v1/enrollments/:id/status`
+
+## Current M10 feature set
+
+The M10 work includes:
+
+- teacher assignment records tying a teacher (staff record), a class, and
+  a subject together for teaching coverage
+- creation validation across the whole chain: the staff record, class, and
+  subject must all exist, and the subject must already be part of the
+  class's curriculum (class_subjects, M8) — an assignment covers teaching,
+  it never widens the curriculum
+- duplicate protection: one assignment per teacher per class-subject
+  pairing (co-teaching stays possible — a different teacher may hold the
+  same class-subject)
+- filtered/paginated listing (by teacher, class, subject, academic year,
+  or free-text search) and assignment removal with metadata-preserving
+  audit rows (`TEACHER_ASSIGNMENT_CREATED`, `TEACHER_ASSIGNMENT_REMOVED`)
+- permission-gated routes: reads under `class.view`, create/remove under
+  `class.update`, mirroring the M8 class-subject mappings this domain
+  sits next to
+
+Key API areas:
+
+- `/api/v1/teacher-assignments`
+- `/api/v1/teacher-assignments/:id`
+- `/api/v1/teachers/:id/assignments`
+
+## How to continue from here
+
+1. Make sure the database and backend are running.
+2. Apply migrations if needed (`docker compose run --rm migrate up`).
+3. Start the API and the frontend.
+4. Log in as the seeded admin and exercise the staff, student, academic, and enrollment workflows.
+5. Move to the next milestone: M11 attendance.
+
+Example flow:
 
 ```bash
-docker compose run --rm sqlc generate
-```
-
-This needs no running database — sqlc parses the SQL files statically. Run
-it again any time a query file or a migration's schema changes; the
-generated code in `db/generated/` is a build artifact of those two inputs.
-
-Current query files, one per table: `people.sql`, `users.sql`,
-`roles.sql`, `permissions.sql`, `role_permissions.sql`, `user_roles.sql`,
-`sessions.sql`, `password_reset_tokens.sql`, `invitation_tokens.sql`.
-Notably `user_roles.sql` includes `ListPermissionsForUser` and
-`UserHasPermission` — the two queries the RBAC middleware uses to enforce
-authorization server-side (section 11: "Hiding a button in the frontend is
-NOT security").
-
-As each later milestone adds its own tables (M6 staff, M7 students, M8
-academics, ...), it adds its own query file alongside them and re-runs
-`sqlc generate` — this isn't a one-time step.
-
-If you'd rather install sqlc locally: [docs.sqlc.dev/en/latest/overview/install.html](https://docs.sqlc.dev/en/latest/overview/install.html),
-then run `sqlc generate` from `backend/`.
-
-## Running the backend without Docker
-
-```bash
-cd backend
-cp ../.env.example .env   # or set DATABASE_URL manually
-go mod tidy
-go run ./cmd/server
-```
-
-## Verification checklist from Milestone 0
-
-These are the checks Milestone 0 was meant to satisfy, kept for reference.
-They have since been executed successfully in a real environment (most
-recently during the M5 verification pass on 2026-10-03).
-
-```bash
-# Postgres starts and is healthy
+cd /media/light/Grace/schoolhub_1
 docker compose up -d postgres
-docker compose ps          # postgres should show "healthy"
-
-# Migrations apply cleanly
 docker compose run --rm migrate up
-docker compose run --rm migrate version   # should report 000002
+cd backend && go run ./cmd/server
 
-# sqlc generates without errors
-docker compose run --rm sqlc generate
-ls backend/db/generated   # should contain .go files, not be empty
-
-# Backend connects to Postgres and serves the health endpoint
-cd backend && go mod tidy && go run ./cmd/server
-curl http://localhost:8080/api/v1/health
-
-# Frontend builds and type-checks
-cd frontend && npm install && npm run typecheck && npm run build
-
-# Frontend can reach the backend
-npm run dev
-# open http://localhost:3000 — confirm no console errors, page renders
+# in another terminal
+cd frontend && npm run dev
 ```
 
-## Environment variables
+Then open the app and log in with:
 
-See `.env.example` at the repo root, `frontend/.env.local.example`, and
-`backend/config/config.go` for what each variable does.
+- Email: admin@schoolhub.test
+- Password: ChangeMe123!
 
-## Tech stack
+## Verification notes
 
-Next.js · React · TypeScript · Tailwind CSS · Go · Gin · pgx · sqlc ·
-PostgreSQL · Docker
+The backend and all domain packages build and test successfully:
+
+```bash
+cd backend && go build ./... && go test ./...
+cd frontend && npm run typecheck
+```
 
 ## Roadmap
 
-Implemented milestone-by-milestone (done: M0 init, M2 migrations, M3 sqlc,
-M4 auth, M5 RBAC): init → migrations → sqlc → auth → RBAC →
-people/staff → students/guardians → academics → enrollment → teacher
-assignments → attendance → assessments/results → announcements → dashboards
-(admin/teacher/parent/student) → reports → audit logs → security hardening →
-testing → seed data → deployment → documentation.
+Completed:
+
+- M0 project setup
+- M1 architecture
+- M2 migrations
+- M3 sqlc
+- M4 auth
+- M5 RBAC
+- M6 people and staff
+- M7 students and guardians
+- M8 academic structure
+- M9 enrollment
+- M10 teacher assignments
+
+Next:
+
+- M11 attendance
+- M12 assessments and results
+- M13 announcements
+- M14 admin dashboard
+- M15 teacher portal
+- M16 parent portal
+- M17 student portal
+- M18 reports
+- M19 audit logs
+- M20 security hardening
+- M21 testing
+- M22 seed/demo environment
+- M23 deployment
+- M24 documentation and portfolio preparation
+
+## Tech stack
+
+Next.js · TypeScript · Tailwind CSS · Go · Gin · pgx · sqlc · PostgreSQL · Docker
+
