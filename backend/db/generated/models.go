@@ -55,6 +55,19 @@ type Department struct {
 	UpdatedAt   pgtype.Timestamptz `json:"updated_at"`
 }
 
+type Enrollment struct {
+	ID             uuid.UUID          `json:"id"`
+	StudentID      uuid.UUID          `json:"student_id"`
+	AcademicYearID uuid.UUID          `json:"academic_year_id"`
+	ClassID        uuid.UUID          `json:"class_id"`
+	Status         string             `json:"status"`
+	EnrollmentDate pgtype.Date        `json:"enrollment_date"`
+	ExitDate       pgtype.Date        `json:"exit_date"`
+	Notes          pgtype.Text        `json:"notes"`
+	CreatedAt      pgtype.Timestamptz `json:"created_at"`
+	UpdatedAt      pgtype.Timestamptz `json:"updated_at"`
+}
+
 type Guardian struct {
 	ID         uuid.UUID          `json:"id"`
 	PersonID   uuid.UUID          `json:"person_id"`

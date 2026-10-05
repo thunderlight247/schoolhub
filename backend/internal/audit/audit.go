@@ -52,6 +52,10 @@ const (
 	ActionClassUpdated           = "CLASS_UPDATED"
 	ActionClassSubjectAssigned   = "CLASS_SUBJECT_ASSIGNED"
 	ActionClassSubjectRemoved    = "CLASS_SUBJECT_REMOVED"
+
+	// M9 — enrollment history.
+	ActionEnrollmentCreated       = "ENROLLMENT_CREATED"
+	ActionEnrollmentStatusUpdated = "ENROLLMENT_STATUS_UPDATED"
 )
 
 // Resource types referenced by audit entries.
@@ -71,6 +75,9 @@ const (
 	ResourceProgramme    = "programme"
 	ResourceSubject      = "subject"
 	ResourceClass        = "class"
+
+	// M9.
+	ResourceEnrollment = "enrollment"
 )
 
 // Entry describes one auditable action. ActorUserID/ResourceID may be the

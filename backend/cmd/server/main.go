@@ -20,6 +20,7 @@ import (
 	"github.com/thunderlight247/schoolhub/backend/internal/academics"
 	"github.com/thunderlight247/schoolhub/backend/internal/auth"
 	"github.com/thunderlight247/schoolhub/backend/internal/database"
+	"github.com/thunderlight247/schoolhub/backend/internal/enrollment"
 	"github.com/thunderlight247/schoolhub/backend/internal/rbac"
 	"github.com/thunderlight247/schoolhub/backend/internal/staff"
 	"github.com/thunderlight247/schoolhub/backend/internal/students"
@@ -250,6 +251,37 @@ func main() {
 			updateAcademics.PATCH("/classes/:id", academicsHandler.UpdateClass)
 			updateAcademics.POST("/classes/:id/subjects", academicsHandler.AssignSubjectToClass)
 			updateAcademics.DELETE("/classes/:id/subjects/:subject_id", academicsHandler.RemoveSubjectFromClass)
+		}
+	}
+
+	// Enrollment history (M9): student membership in academic years/classes.
+	enrollmentService := enrollment.NewService(pool)
+	enrollmentHandler := enrollment.NewHandler(enrollmentService)
+	enrollmentRoutes := v1.Group("")
+	enrollmentRoutes.Use(auth.RequireAuth(authService, sessionCookieName))
+	{
+		viewEnrollments := enrollmentRoutes.Group("")
+		viewEnrollments.Use(rbac.RequirePermission(rbacService, "class.view"))
+		{
+			viewEnrollments.GET("/enrollments", enrollmentHandler.ListEnrollments)
+			viewEnrollments.GET("/enrollments/:id", enrollmentHandler.GetEnrollment)
+			// The nested route must reuse the :id wildcard name — gin panics at
+			// registration time when the same path position carries two
+			// differently-named wildcards (:id above, :student_id here).
+			viewEnrollments.GET("/students/:id/enrollments", enrollmentHandler.ListEnrollments)
+		}
+
+		createEnrollments := enrollmentRoutes.Group("")
+		createEnrollments.Use(rbac.RequirePermission(rbacService, "class.create"))
+		{
+			createEnrollments.POST("/enrollments", enrollmentHandler.CreateEnrollment)
+			createEnrollments.POST("/students/:id/enrollments", enrollmentHandler.CreateEnrollment)
+		}
+
+		updateEnrollments := enrollmentRoutes.Group("")
+		updateEnrollments.Use(rbac.RequirePermission(rbacService, "class.update"))
+		{
+			updateEnrollments.PATCH("/enrollments/:id/status", enrollmentHandler.UpdateEnrollmentStatus)
 		}
 	}
 

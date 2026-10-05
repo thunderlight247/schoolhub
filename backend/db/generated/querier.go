@@ -18,6 +18,7 @@ type Querier interface {
 	// Used by the admin "replace a user's roles" flow (M6): the transaction
 	// deletes all current rows then re-assigns the requested set atomically.
 	ClearUserRoles(ctx context.Context, userID uuid.UUID) error
+	CountEnrollments(ctx context.Context, arg CountEnrollmentsParams) (int64, error)
 	CountGuardians(ctx context.Context, search pgtype.Text) (int64, error)
 	// Must stay in sync with ListStaff's WHERE clause (see comment there).
 	CountStaff(ctx context.Context, arg CountStaffParams) (int64, error)
@@ -30,6 +31,7 @@ type Querier interface {
 	CreateAuditLog(ctx context.Context, arg CreateAuditLogParams) error
 	CreateClass(ctx context.Context, arg CreateClassParams) (Class, error)
 	CreateDepartment(ctx context.Context, arg CreateDepartmentParams) (Department, error)
+	CreateEnrollment(ctx context.Context, arg CreateEnrollmentParams) (Enrollment, error)
 	CreateGuardian(ctx context.Context, arg CreateGuardianParams) (Guardian, error)
 	CreateInvitationToken(ctx context.Context, arg CreateInvitationTokenParams) (InvitationToken, error)
 	CreatePasswordResetToken(ctx context.Context, arg CreatePasswordResetTokenParams) (PasswordResetToken, error)
@@ -56,6 +58,7 @@ type Querier interface {
 	GetCurrentAcademicYear(ctx context.Context) (AcademicYear, error)
 	GetCurrentTerm(ctx context.Context) (GetCurrentTermRow, error)
 	GetDepartmentByID(ctx context.Context, id uuid.UUID) (Department, error)
+	GetEnrollmentByID(ctx context.Context, id uuid.UUID) (GetEnrollmentByIDRow, error)
 	GetGuardianByID(ctx context.Context, id uuid.UUID) (GetGuardianByIDRow, error)
 	GetInvitationTokenByHash(ctx context.Context, tokenHash string) (InvitationToken, error)
 	GetPasswordResetTokenByHash(ctx context.Context, tokenHash string) (PasswordResetToken, error)
@@ -84,11 +87,13 @@ type Querier interface {
 	GetUserByEmail(ctx context.Context, email string) (User, error)
 	GetUserByID(ctx context.Context, id uuid.UUID) (User, error)
 	GetUserByPersonID(ctx context.Context, personID uuid.UUID) (User, error)
+	HasActiveEnrollmentForStudentYear(ctx context.Context, arg HasActiveEnrollmentForStudentYearParams) (bool, error)
 	LinkGuardianToStudent(ctx context.Context, arg LinkGuardianToStudentParams) (StudentGuardian, error)
 	ListAcademicYears(ctx context.Context) ([]AcademicYear, error)
 	ListAllTerms(ctx context.Context) ([]ListAllTermsRow, error)
 	ListClasses(ctx context.Context, arg ListClassesParams) ([]ListClassesRow, error)
 	ListDepartments(ctx context.Context) ([]Department, error)
+	ListEnrollments(ctx context.Context, arg ListEnrollmentsParams) ([]ListEnrollmentsRow, error)
 	// Backs the "search existing guardian to link" workflow as well as a
 	// standalone guardians directory. No status filter (guardians, unlike
 	// students/staff, have no archived/inactive state in this milestone).
@@ -138,6 +143,7 @@ type Querier interface {
 	UnsetCurrentTerms(ctx context.Context) error
 	UpdateAcademicYear(ctx context.Context, arg UpdateAcademicYearParams) (AcademicYear, error)
 	UpdateClass(ctx context.Context, arg UpdateClassParams) (Class, error)
+	UpdateEnrollmentStatus(ctx context.Context, arg UpdateEnrollmentStatusParams) (Enrollment, error)
 	UpdateGuardianOccupation(ctx context.Context, arg UpdateGuardianOccupationParams) (Guardian, error)
 	UpdatePerson(ctx context.Context, arg UpdatePersonParams) (Person, error)
 	UpdateProgramme(ctx context.Context, arg UpdateProgrammeParams) (Programme, error)
