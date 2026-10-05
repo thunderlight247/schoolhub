@@ -24,6 +24,9 @@ type Querier interface {
 	CountStaff(ctx context.Context, arg CountStaffParams) (int64, error)
 	// Must stay in sync with ListStudents' WHERE clause.
 	CountStudents(ctx context.Context, arg CountStudentsParams) (int64, error)
+	// Must stay in sync with ListTeacherAssignments' WHERE clause (see the
+	// comment there).
+	CountTeacherAssignments(ctx context.Context, arg CountTeacherAssignmentsParams) (int64, error)
 	CreateAcademicYear(ctx context.Context, arg CreateAcademicYearParams) (AcademicYear, error)
 	// Append-only: no UPDATE/DELETE queries exist for this table by design
 	// (see migration 000006). Callers pass a tx-bound Querier so the audit
@@ -42,6 +45,7 @@ type Querier interface {
 	CreateStaffPosition(ctx context.Context, arg CreateStaffPositionParams) (StaffPosition, error)
 	CreateStudent(ctx context.Context, arg CreateStudentParams) (Student, error)
 	CreateSubject(ctx context.Context, arg CreateSubjectParams) (Subject, error)
+	CreateTeacherAssignment(ctx context.Context, arg CreateTeacherAssignmentParams) (TeacherAssignment, error)
 	CreateTerm(ctx context.Context, arg CreateTermParams) (Term, error)
 	CreateUser(ctx context.Context, arg CreateUserParams) (User, error)
 	// Used on password change (and by the admin "suspend user" action in M5) to
@@ -53,6 +57,7 @@ type Querier interface {
 	// regardless; this just reclaims the rows.
 	DeleteExpiredSessions(ctx context.Context) error
 	DeleteSession(ctx context.Context, tokenHash string) error
+	DeleteTeacherAssignment(ctx context.Context, id uuid.UUID) error
 	GetAcademicYearByID(ctx context.Context, id uuid.UUID) (AcademicYear, error)
 	GetClassByID(ctx context.Context, id uuid.UUID) (GetClassByIDRow, error)
 	GetCurrentAcademicYear(ctx context.Context) (AcademicYear, error)
@@ -79,6 +84,10 @@ type Querier interface {
 	GetStudentByID(ctx context.Context, id uuid.UUID) (GetStudentByIDRow, error)
 	GetSubjectByCode(ctx context.Context, code string) (Subject, error)
 	GetSubjectByID(ctx context.Context, id uuid.UUID) (GetSubjectByIDRow, error)
+	// The assignment detail row: mapping + the human-readable names the UI
+	// shows (teacher person data via the staff row, class, its academic year,
+	// subject), in one round trip — same shape as GetEnrollmentByID.
+	GetTeacherAssignmentByID(ctx context.Context, id uuid.UUID) (GetTeacherAssignmentByIDRow, error)
 	GetTermByID(ctx context.Context, id uuid.UUID) (GetTermByIDRow, error)
 	// The login lookup. Returns SUSPENDED/INACTIVE users too — M4's auth
 	// service is responsible for checking `status` before issuing a session,
@@ -88,6 +97,9 @@ type Querier interface {
 	GetUserByID(ctx context.Context, id uuid.UUID) (User, error)
 	GetUserByPersonID(ctx context.Context, personID uuid.UUID) (User, error)
 	HasActiveEnrollmentForStudentYear(ctx context.Context, arg HasActiveEnrollmentForStudentYearParams) (bool, error)
+	// An assignment may only cover a subject the class actually teaches
+	// (class_subjects, 000008).
+	HasClassSubject(ctx context.Context, arg HasClassSubjectParams) (bool, error)
 	LinkGuardianToStudent(ctx context.Context, arg LinkGuardianToStudentParams) (StudentGuardian, error)
 	ListAcademicYears(ctx context.Context) ([]AcademicYear, error)
 	ListAllTerms(ctx context.Context) ([]ListAllTermsRow, error)
@@ -121,6 +133,11 @@ type Querier interface {
 	ListStudentsForGuardian(ctx context.Context, guardianID uuid.UUID) ([]ListStudentsForGuardianRow, error)
 	ListSubjects(ctx context.Context, arg ListSubjectsParams) ([]ListSubjectsRow, error)
 	ListSubjectsForClass(ctx context.Context, classID uuid.UUID) ([]ListSubjectsForClassRow, error)
+	// Paginated, filtered assignment list. Every filter is optional: a NULL
+	// narg disables that condition. academic_year_id filters through the
+	// class (classes carry the year, 000008). Keep this WHERE clause and
+	// CountTeacherAssignments' in sync — see the same note on ListStaff.
+	ListTeacherAssignments(ctx context.Context, arg ListTeacherAssignmentsParams) ([]ListTeacherAssignmentsRow, error)
 	ListTermsForAcademicYear(ctx context.Context, academicYearID uuid.UUID) ([]ListTermsForAcademicYearRow, error)
 	MarkInvitationTokenAccepted(ctx context.Context, id uuid.UUID) error
 	MarkPasswordResetTokenUsed(ctx context.Context, id uuid.UUID) error

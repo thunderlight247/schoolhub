@@ -56,6 +56,10 @@ const (
 	// M9 — enrollment history.
 	ActionEnrollmentCreated       = "ENROLLMENT_CREATED"
 	ActionEnrollmentStatusUpdated = "ENROLLMENT_STATUS_UPDATED"
+
+	// M10 — teacher assignments.
+	ActionTeacherAssignmentCreated = "TEACHER_ASSIGNMENT_CREATED"
+	ActionTeacherAssignmentRemoved = "TEACHER_ASSIGNMENT_REMOVED"
 )
 
 // Resource types referenced by audit entries.
@@ -78,6 +82,9 @@ const (
 
 	// M9.
 	ResourceEnrollment = "enrollment"
+
+	// M10.
+	ResourceTeacherAssignment = "teacher_assignment"
 )
 
 // Entry describes one auditable action. ActorUserID/ResourceID may be the

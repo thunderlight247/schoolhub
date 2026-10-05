@@ -18,6 +18,7 @@ import (
 	"github.com/thunderlight247/schoolhub/backend/config"
 	db "github.com/thunderlight247/schoolhub/backend/db/generated"
 	"github.com/thunderlight247/schoolhub/backend/internal/academics"
+	"github.com/thunderlight247/schoolhub/backend/internal/assignments"
 	"github.com/thunderlight247/schoolhub/backend/internal/auth"
 	"github.com/thunderlight247/schoolhub/backend/internal/database"
 	"github.com/thunderlight247/schoolhub/backend/internal/enrollment"
@@ -282,6 +283,32 @@ func main() {
 		updateEnrollments.Use(rbac.RequirePermission(rbacService, "class.update"))
 		{
 			updateEnrollments.PATCH("/enrollments/:id/status", enrollmentHandler.UpdateEnrollmentStatus)
+		}
+	}
+
+	// Teacher assignments (M10): which teacher teaches which subject in
+	// which class. Read access follows classes (class.view); creating and
+	// removing assignments is a teaching-coverage change, gated like the
+	// class-subject mappings in M8 (class.update).
+	assignmentsService := assignments.NewService(pool)
+	assignmentsHandler := assignments.NewHandler(assignmentsService)
+	assignmentRoutes := v1.Group("")
+	assignmentRoutes.Use(auth.RequireAuth(authService, sessionCookieName))
+	{
+		viewAssignments := assignmentRoutes.Group("")
+		viewAssignments.Use(rbac.RequirePermission(rbacService, "class.view"))
+		{
+			viewAssignments.GET("/teacher-assignments", assignmentsHandler.ListTeacherAssignments)
+			viewAssignments.GET("/teacher-assignments/:id", assignmentsHandler.GetTeacherAssignment)
+			viewAssignments.GET("/teachers/:id/assignments", assignmentsHandler.ListTeacherAssignments)
+		}
+
+		updateAssignments := assignmentRoutes.Group("")
+		updateAssignments.Use(rbac.RequirePermission(rbacService, "class.update"))
+		{
+			updateAssignments.POST("/teacher-assignments", assignmentsHandler.CreateTeacherAssignment)
+			updateAssignments.POST("/teachers/:id/assignments", assignmentsHandler.CreateTeacherAssignment)
+			updateAssignments.DELETE("/teacher-assignments/:id", assignmentsHandler.DeleteTeacherAssignment)
 		}
 	}
 

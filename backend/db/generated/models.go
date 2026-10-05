@@ -199,6 +199,15 @@ type Subject struct {
 	UpdatedAt    pgtype.Timestamptz `json:"updated_at"`
 }
 
+type TeacherAssignment struct {
+	ID        uuid.UUID          `json:"id"`
+	TeacherID uuid.UUID          `json:"teacher_id"`
+	ClassID   uuid.UUID          `json:"class_id"`
+	SubjectID uuid.UUID          `json:"subject_id"`
+	CreatedAt pgtype.Timestamptz `json:"created_at"`
+	UpdatedAt pgtype.Timestamptz `json:"updated_at"`
+}
+
 type Term struct {
 	ID             uuid.UUID          `json:"id"`
 	AcademicYearID uuid.UUID          `json:"academic_year_id"`
