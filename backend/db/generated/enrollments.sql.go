@@ -169,6 +169,32 @@ func (q *Queries) GetEnrollmentByID(ctx context.Context, id uuid.UUID) (GetEnrol
 	return i, err
 }
 
+const hasActiveClassEnrollment = `-- name: HasActiveClassEnrollment :one
+SELECT EXISTS (
+    SELECT 1
+    FROM enrollments e
+    WHERE e.student_id = $1
+      AND e.class_id = $2
+      AND e.status = 'ENROLLED'
+)
+`
+
+type HasActiveClassEnrollmentParams struct {
+	StudentID uuid.UUID `json:"student_id"`
+	ClassID   uuid.UUID `json:"class_id"`
+}
+
+// Used by attendance (M11): a student may only be marked on a register for
+// a class they are currently enrolled in (status ENROLLED). COMPLETED and
+// TRANSFERRED are historical memberships — their past marks stay readable,
+// but they get no new ones.
+func (q *Queries) HasActiveClassEnrollment(ctx context.Context, arg HasActiveClassEnrollmentParams) (bool, error) {
+	row := q.db.QueryRow(ctx, hasActiveClassEnrollment, arg.StudentID, arg.ClassID)
+	var exists bool
+	err := row.Scan(&exists)
+	return exists, err
+}
+
 const hasActiveEnrollmentForStudentYear = `-- name: HasActiveEnrollmentForStudentYear :one
 SELECT EXISTS (
     SELECT 1

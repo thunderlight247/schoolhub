@@ -19,6 +19,56 @@ type AcademicYear struct {
 	UpdatedAt pgtype.Timestamptz `json:"updated_at"`
 }
 
+type Announcement struct {
+	ID            uuid.UUID          `json:"id"`
+	Title         string             `json:"title"`
+	Content       string             `json:"content"`
+	AuthorID      uuid.UUID          `json:"author_id"`
+	Status        string             `json:"status"`
+	TargetType    string             `json:"target_type"`
+	TargetRole    pgtype.Text        `json:"target_role"`
+	TargetClassID pgtype.UUID        `json:"target_class_id"`
+	Priority      string             `json:"priority"`
+	PublishedAt   pgtype.Timestamptz `json:"published_at"`
+	ExpiresAt     pgtype.Timestamptz `json:"expires_at"`
+	CreatedAt     pgtype.Timestamptz `json:"created_at"`
+	UpdatedAt     pgtype.Timestamptz `json:"updated_at"`
+}
+
+type Assessment struct {
+	ID             uuid.UUID          `json:"id"`
+	ClassID        uuid.UUID          `json:"class_id"`
+	SubjectID      uuid.UUID          `json:"subject_id"`
+	TermID         uuid.UUID          `json:"term_id"`
+	Title          string             `json:"title"`
+	Type           string             `json:"type"`
+	MaxScore       pgtype.Numeric     `json:"max_score"`
+	Weight         pgtype.Numeric     `json:"weight"`
+	AssessmentDate pgtype.Date        `json:"assessment_date"`
+	CreatedAt      pgtype.Timestamptz `json:"created_at"`
+	UpdatedAt      pgtype.Timestamptz `json:"updated_at"`
+}
+
+type AttendanceRecord struct {
+	ID        uuid.UUID          `json:"id"`
+	SessionID uuid.UUID          `json:"session_id"`
+	StudentID uuid.UUID          `json:"student_id"`
+	Status    string             `json:"status"`
+	Notes     pgtype.Text        `json:"notes"`
+	CreatedAt pgtype.Timestamptz `json:"created_at"`
+	UpdatedAt pgtype.Timestamptz `json:"updated_at"`
+}
+
+type AttendanceSession struct {
+	ID          uuid.UUID          `json:"id"`
+	ClassID     uuid.UUID          `json:"class_id"`
+	SubjectID   uuid.UUID          `json:"subject_id"`
+	TermID      uuid.UUID          `json:"term_id"`
+	SessionDate pgtype.Date        `json:"session_date"`
+	CreatedAt   pgtype.Timestamptz `json:"created_at"`
+	UpdatedAt   pgtype.Timestamptz `json:"updated_at"`
+}
+
 type AuditLog struct {
 	ID           uuid.UUID          `json:"id"`
 	ActorUserID  pgtype.UUID        `json:"actor_user_id"`
@@ -125,6 +175,17 @@ type Programme struct {
 	Description pgtype.Text        `json:"description"`
 	CreatedAt   pgtype.Timestamptz `json:"created_at"`
 	UpdatedAt   pgtype.Timestamptz `json:"updated_at"`
+}
+
+type Result struct {
+	ID           uuid.UUID          `json:"id"`
+	AssessmentID uuid.UUID          `json:"assessment_id"`
+	StudentID    uuid.UUID          `json:"student_id"`
+	Score        pgtype.Numeric     `json:"score"`
+	Grade        pgtype.Text        `json:"grade"`
+	Remarks      pgtype.Text        `json:"remarks"`
+	CreatedAt    pgtype.Timestamptz `json:"created_at"`
+	UpdatedAt    pgtype.Timestamptz `json:"updated_at"`
 }
 
 type Role struct {

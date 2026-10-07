@@ -60,6 +60,24 @@ const (
 	// M10 — teacher assignments.
 	ActionTeacherAssignmentCreated = "TEACHER_ASSIGNMENT_CREATED"
 	ActionTeacherAssignmentRemoved = "TEACHER_ASSIGNMENT_REMOVED"
+
+	// M11 — attendance.
+	ActionAttendanceRecorded      = "ATTENDANCE_RECORDED"
+	ActionAttendanceRecordUpdated = "ATTENDANCE_RECORD_UPDATED"
+
+	// M12 — assessments and results.
+	ActionAssessmentCreated = "ASSESSMENT_CREATED"
+	ActionAssessmentUpdated = "ASSESSMENT_UPDATED"
+	ActionAssessmentDeleted = "ASSESSMENT_DELETED"
+	ActionResultsRecorded   = "RESULTS_RECORDED"
+	ActionResultUpdated     = "RESULT_UPDATED"
+
+	// M13 — announcements.
+	ActionAnnouncementCreated   = "ANNOUNCEMENT_CREATED"
+	ActionAnnouncementUpdated   = "ANNOUNCEMENT_UPDATED"
+	ActionAnnouncementPublished = "ANNOUNCEMENT_PUBLISHED"
+	ActionAnnouncementArchived  = "ANNOUNCEMENT_ARCHIVED"
+	ActionAnnouncementDeleted   = "ANNOUNCEMENT_DELETED"
 )
 
 // Resource types referenced by audit entries.
@@ -85,6 +103,17 @@ const (
 
 	// M10.
 	ResourceTeacherAssignment = "teacher_assignment"
+
+	// M11.
+	ResourceAttendanceSession = "attendance_session"
+	ResourceAttendanceRecord  = "attendance_record"
+
+	// M12.
+	ResourceAssessment = "assessment"
+	ResourceResult     = "result"
+
+	// M13.
+	ResourceAnnouncement = "announcement"
 )
 
 // Entry describes one auditable action. ActorUserID/ResourceID may be the

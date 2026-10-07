@@ -1,4 +1,4 @@
-// Package announcements will hold the announcements domain (HTTP handlers, service/business logic,
-// and repository/sqlc-backed data access) starting from a later milestone.
-// It is intentionally empty at Milestone 0.
+// Package announcements implements the announcements domain (milestone M13).
+// It provides school-wide broadcasts and targeted announcements (by role or class cohort),
+// draft/published/archived status flows, audience resolution, and transactional audit logging.
 package announcements

@@ -18,13 +18,19 @@ import (
 	"github.com/thunderlight247/schoolhub/backend/config"
 	db "github.com/thunderlight247/schoolhub/backend/db/generated"
 	"github.com/thunderlight247/schoolhub/backend/internal/academics"
+	"github.com/thunderlight247/schoolhub/backend/internal/announcements"
+	"github.com/thunderlight247/schoolhub/backend/internal/assessments"
 	"github.com/thunderlight247/schoolhub/backend/internal/assignments"
+	"github.com/thunderlight247/schoolhub/backend/internal/attendance"
 	"github.com/thunderlight247/schoolhub/backend/internal/auth"
+	"github.com/thunderlight247/schoolhub/backend/internal/dashboard"
 	"github.com/thunderlight247/schoolhub/backend/internal/database"
 	"github.com/thunderlight247/schoolhub/backend/internal/enrollment"
+	"github.com/thunderlight247/schoolhub/backend/internal/parentportal"
 	"github.com/thunderlight247/schoolhub/backend/internal/rbac"
 	"github.com/thunderlight247/schoolhub/backend/internal/staff"
 	"github.com/thunderlight247/schoolhub/backend/internal/students"
+	"github.com/thunderlight247/schoolhub/backend/internal/teacherportal"
 )
 
 func main() {
@@ -310,6 +316,163 @@ func main() {
 			updateAssignments.POST("/teachers/:id/assignments", assignmentsHandler.CreateTeacherAssignment)
 			updateAssignments.DELETE("/teacher-assignments/:id", assignmentsHandler.DeleteTeacherAssignment)
 		}
+	}
+
+	// Attendance (M11): teacher-facing register capture (one session per
+	// class/subject/term/day, one mark per student) plus the per-status
+	// summaries the parent/student portals (M16/M17) will read. Gated on the
+	// dedicated attendance.* permission codes from section 11: attendance.view
+	// (also held by PARENT/STUDENT for the portals), attendance.record for
+	// taking a register, and attendance.update for mark corrections.
+	attendanceService := attendance.NewService(pool)
+	attendanceHandler := attendance.NewHandler(attendanceService)
+	attendanceRoutes := v1.Group("")
+	attendanceRoutes.Use(auth.RequireAuth(authService, sessionCookieName))
+	{
+		viewAttendance := attendanceRoutes.Group("")
+		viewAttendance.Use(rbac.RequirePermission(rbacService, "attendance.view"))
+		{
+			viewAttendance.GET("/attendance/sessions", attendanceHandler.ListSessions)
+			viewAttendance.GET("/attendance/sessions/:id", attendanceHandler.GetSession)
+			viewAttendance.GET("/students/:id/attendance/summary", attendanceHandler.StudentSummary)
+			viewAttendance.GET("/classes/:id/attendance/summary", attendanceHandler.ClassSummary)
+		}
+
+		recordAttendance := attendanceRoutes.Group("")
+		recordAttendance.Use(rbac.RequirePermission(rbacService, "attendance.record"))
+		{
+			recordAttendance.POST("/attendance/sessions", attendanceHandler.CreateSession)
+		}
+
+		correctAttendance := attendanceRoutes.Group("")
+		correctAttendance.Use(rbac.RequirePermission(rbacService, "attendance.update"))
+		{
+			correctAttendance.PATCH("/attendance/records/:id", attendanceHandler.UpdateRecord)
+		}
+	}
+
+	// Assessments and results (M12): graded events per class/subject/term
+	// and per-student results (score, grade, remarks). Permissions are
+	// assessment.view, assessment.create, assessment.update, result.view,
+	// result.create, and result.update.
+	assessmentsService := assessments.NewService(pool)
+	assessmentsHandler := assessments.NewHandler(assessmentsService)
+	assessmentRoutes := v1.Group("")
+	assessmentRoutes.Use(auth.RequireAuth(authService, sessionCookieName))
+	{
+		viewAssessments := assessmentRoutes.Group("")
+		viewAssessments.Use(rbac.RequirePermission(rbacService, "assessment.view"))
+		{
+			viewAssessments.GET("/assessments", assessmentsHandler.ListAssessments)
+			viewAssessments.GET("/assessments/:id", assessmentsHandler.GetAssessment)
+		}
+
+		createAssessments := assessmentRoutes.Group("")
+		createAssessments.Use(rbac.RequirePermission(rbacService, "assessment.create"))
+		{
+			createAssessments.POST("/assessments", assessmentsHandler.CreateAssessment)
+		}
+
+		updateAssessments := assessmentRoutes.Group("")
+		updateAssessments.Use(rbac.RequirePermission(rbacService, "assessment.update"))
+		{
+			updateAssessments.PATCH("/assessments/:id", assessmentsHandler.UpdateAssessment)
+			updateAssessments.DELETE("/assessments/:id", assessmentsHandler.DeleteAssessment)
+		}
+
+		viewResults := assessmentRoutes.Group("")
+		viewResults.Use(rbac.RequirePermission(rbacService, "result.view"))
+		{
+			viewResults.GET("/assessments/:id/results", assessmentsHandler.ListAssessmentResults)
+			viewResults.GET("/results/:id", assessmentsHandler.GetResult)
+			viewResults.GET("/students/:id/results", assessmentsHandler.ListStudentResults)
+		}
+
+		recordResults := assessmentRoutes.Group("")
+		recordResults.Use(rbac.RequirePermission(rbacService, "result.create"))
+		{
+			recordResults.POST("/assessments/:id/results", assessmentsHandler.RecordResults)
+		}
+
+		updateResults := assessmentRoutes.Group("")
+		updateResults.Use(rbac.RequirePermission(rbacService, "result.update"))
+		{
+			updateResults.PATCH("/results/:id", assessmentsHandler.UpdateResult)
+		}
+	}
+
+	// Announcements (M13): school-wide broadcasts and targeted announcements
+	// (per role or per class cohort), draft/published/archived status flow,
+	// and audience feed filtering. Permissions are announcement.view,
+	// announcement.create, and announcement.update.
+	announcementsService := announcements.NewService(pool)
+	announcementsHandler := announcements.NewHandler(announcementsService)
+	announcementRoutes := v1.Group("")
+	announcementRoutes.Use(auth.RequireAuth(authService, sessionCookieName))
+	{
+		viewAnnouncements := announcementRoutes.Group("")
+		viewAnnouncements.Use(rbac.RequirePermission(rbacService, "announcement.view"))
+		{
+			viewAnnouncements.GET("/announcements", announcementsHandler.ListAnnouncements)
+			viewAnnouncements.GET("/announcements/:id", announcementsHandler.GetAnnouncement)
+		}
+
+		createAnnouncements := announcementRoutes.Group("")
+		createAnnouncements.Use(rbac.RequirePermission(rbacService, "announcement.create"))
+		{
+			createAnnouncements.POST("/announcements", announcementsHandler.CreateAnnouncement)
+		}
+
+		updateAnnouncements := announcementRoutes.Group("")
+		updateAnnouncements.Use(rbac.RequirePermission(rbacService, "announcement.update"))
+		{
+			updateAnnouncements.PATCH("/announcements/:id", announcementsHandler.UpdateAnnouncement)
+			updateAnnouncements.POST("/announcements/:id/publish", announcementsHandler.PublishAnnouncement)
+			updateAnnouncements.POST("/announcements/:id/archive", announcementsHandler.ArchiveAnnouncement)
+			updateAnnouncements.DELETE("/announcements/:id", announcementsHandler.DeleteAnnouncement)
+		}
+	}
+
+	// Admin dashboard (M14): institutional overview aggregating student/staff/class
+	// KPIs, academic calendar context, daily attendance rates, recent announcements,
+	// system audit log activity, and quick actions. Gated on the ADMIN role.
+	dashboardService := dashboard.NewService(pool)
+	dashboardHandler := dashboard.NewHandler(dashboardService)
+	dashboardRoutes := v1.Group("")
+	dashboardRoutes.Use(auth.RequireAuth(authService, sessionCookieName))
+	dashboardRoutes.Use(rbac.RequireRole(rbacService, "ADMIN"))
+	{
+		dashboardRoutes.GET("/dashboard/admin", dashboardHandler.GetAdminDashboard)
+	}
+
+	// Teacher portal (M15): teacher-specific operational context (assigned classes
+	// and subjects, student rosters with guardian contacts, academic calendar status,
+	// recent attendance registers, assessment score entry tracking, and teacher announcements).
+	// Gated on the TEACHER role.
+	teacherPortalService := teacherportal.NewService(pool)
+	teacherPortalHandler := teacherportal.NewHandler(teacherPortalService)
+	teacherPortalRoutes := v1.Group("")
+	teacherPortalRoutes.Use(auth.RequireAuth(authService, sessionCookieName))
+	teacherPortalRoutes.Use(rbac.RequireRole(rbacService, "TEACHER"))
+	{	teacherPortalRoutes.GET("/portal/teacher/overview", teacherPortalHandler.GetTeacherOverview)
+	teacherPortalRoutes.GET("/portal/teacher/classes", teacherPortalHandler.GetTeacherClasses)
+	teacherPortalRoutes.GET("/portal/teacher/classes/:id/roster", teacherPortalHandler.GetClassRoster)
+	}
+
+	// Parent portal (M16): parent-specific read-only context (guardian profile,
+	// linked children with active enrollment and lifetime attendance/results
+	// aggregates, and per-child detail with recent attendance marks and full
+	// results history). Row-level scoping ("only their own children") is
+	// enforced in the service via student_guardians, per migration 000004's
+	// note that RBAC cannot express row ownership. Gated on the PARENT role.
+	parentPortalService := parentportal.NewService(pool)
+	parentPortalHandler := parentportal.NewHandler(parentPortalService)
+	parentPortalRoutes := v1.Group("")
+	parentPortalRoutes.Use(auth.RequireAuth(authService, sessionCookieName))
+	parentPortalRoutes.Use(rbac.RequireRole(rbacService, "PARENT"))
+	{
+		parentPortalRoutes.GET("/portal/parent/overview", parentPortalHandler.GetParentOverview)
+		parentPortalRoutes.GET("/portal/parent/children/:id", parentPortalHandler.GetChildDetail)
 	}
 
 	addr := ":" + cfg.Port

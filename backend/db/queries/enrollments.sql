@@ -113,3 +113,16 @@ SELECT EXISTS (
       AND e.academic_year_id = sqlc.arg(academic_year_id)
       AND e.status IN ('ENROLLED', 'COMPLETED', 'TRANSFERRED')
 );
+
+-- name: HasActiveClassEnrollment :one
+-- Used by attendance (M11): a student may only be marked on a register for
+-- a class they are currently enrolled in (status ENROLLED). COMPLETED and
+-- TRANSFERRED are historical memberships — their past marks stay readable,
+-- but they get no new ones.
+SELECT EXISTS (
+    SELECT 1
+    FROM enrollments e
+    WHERE e.student_id = sqlc.arg(student_id)
+      AND e.class_id = sqlc.arg(class_id)
+      AND e.status = 'ENROLLED'
+);

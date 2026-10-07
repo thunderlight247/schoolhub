@@ -1,4 +1,5 @@
-// Package assessments will hold the assessments domain (HTTP handlers, service/business logic,
-// and repository/sqlc-backed data access) starting from a later milestone.
-// It is intentionally empty at Milestone 0.
+// Package assessments holds the assessments and results domain (M12):
+// HTTP handlers, service/business logic, and sqlc-backed data access for
+// graded events (assessments), score sheet recording, single result updates,
+// and student result history.
 package assessments
