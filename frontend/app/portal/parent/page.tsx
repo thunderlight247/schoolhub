@@ -1,7 +1,9 @@
 "use client";
 
 import { useEffect, useState } from "react";
-import Link from "next/link";
+import { AppShell } from "@/components/app-shell";
+import { ProtectedRoute } from "@/components/protected-route";
+import { Tabs } from "@/components/ui/tabs";
 import {
   ChildDetail,
   ChildSummary,
@@ -67,38 +69,27 @@ export default function ParentPortalPage() {
     loadDetail();
   }, [selectedChild]);
 
+  const contextChips = (
+    <>
+      {data?.children?.[0]?.enrollment?.academic_year_name && (
+        <span className="rounded-full bg-brand-50 px-3 py-1 text-xs font-semibold text-brand-700 border border-brand-100">
+          AY {data.children[0].enrollment.academic_year_name}
+        </span>
+      )}
+      <button
+        onClick={loadData}
+        disabled={loading}
+        className="rounded-md border border-slate-200 bg-white px-3 py-1.5 text-xs font-medium text-slate-700 shadow-sm hover:bg-slate-50 disabled:opacity-50"
+      >
+        Refresh
+      </button>
+    </>
+  );
+
   return (
-    <div className="min-h-screen bg-slate-50 text-slate-900 pb-16">
-      {/* Top Header */}
-      <header className="border-b border-slate-200 bg-white sticky top-0 z-10 shadow-sm">
-        <div className="mx-auto flex max-w-7xl items-center justify-between px-4 py-4 sm:px-6 lg:px-8">
-          <div className="flex items-center gap-3">
-            <Link href="/" className="text-xl font-bold text-brand-900 hover:text-brand-700">
-              SchoolHub
-            </Link>
-            <span className="text-slate-300">/</span>
-            <span className="text-sm font-medium text-slate-600">Parent Portal</span>
-          </div>
-
-          <div className="flex items-center gap-3">
-            {data?.children?.[0]?.enrollment?.academic_year_name && (
-              <span className="rounded-full bg-brand-50 px-3 py-1 text-xs font-semibold text-brand-700 border border-brand-100">
-                AY {data.children[0].enrollment.academic_year_name}
-              </span>
-            )}
-            <button
-              onClick={loadData}
-              disabled={loading}
-              className="rounded-md border border-slate-200 bg-white px-3 py-1.5 text-xs font-medium text-slate-700 shadow-sm hover:bg-slate-50 disabled:opacity-50"
-            >
-              Refresh
-            </button>
-          </div>
-        </div>
-      </header>
-
-      {/* Main Content */}
-      <main className="mx-auto max-w-7xl px-4 py-8 sm:px-6 lg:px-8 space-y-8">
+    <ProtectedRoute requiredRole="PARENT">
+      <AppShell title="Parent Portal" actions={contextChips}>
+        <div className="space-y-8">
         {/* Guardian Welcome Banner */}
         <div className="rounded-xl border border-slate-200 bg-white p-6 shadow-sm flex flex-col md:flex-row md:items-center justify-between gap-4">
           <div>
@@ -244,28 +235,16 @@ export default function ParentPortalPage() {
               </div>
 
               {/* Tab switcher */}
-              <div className="flex rounded-lg border border-slate-200 p-0.5 text-xs font-medium">
-                <button
-                  onClick={() => setDetailTab("attendance")}
-                  className={`px-3 py-1.5 rounded-md transition-colors ${
-                    detailTab === "attendance"
-                      ? "bg-brand-600 text-white shadow-sm"
-                      : "text-slate-600 hover:bg-slate-100"
-                  }`}
-                >
-                  Attendance
-                </button>
-                <button
-                  onClick={() => setDetailTab("results")}
-                  className={`px-3 py-1.5 rounded-md transition-colors ${
-                    detailTab === "results"
-                      ? "bg-brand-600 text-white shadow-sm"
-                      : "text-slate-600 hover:bg-slate-100"
-                  }`}
-                >
-                  Results
-                </button>
-              </div>
+              <Tabs
+                label="Child detail sections"
+                active={detailTab}
+                onChange={setDetailTab}
+                variant="pills"
+                items={[
+                  { key: "attendance", label: "Attendance" },
+                  { key: "results", label: "Results" },
+                ]}
+              />
             </div>
 
             {detailLoading ? (
@@ -475,7 +454,8 @@ export default function ParentPortalPage() {
             </div>
           )}
         </div>
-      </main>
-    </div>
+        </div>
+      </AppShell>
+    </ProtectedRoute>
   );
 }

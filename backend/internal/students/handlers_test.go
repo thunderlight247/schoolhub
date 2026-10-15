@@ -6,6 +6,7 @@ import (
 	"encoding/json"
 	"net/http"
 	"net/http/httptest"
+	"strings"
 	"testing"
 	"time"
 
@@ -22,7 +23,7 @@ type stubService struct {
 
 	createStudentFn             func(ctx context.Context, actorID uuid.UUID, in CreateStudentInput) (StudentDetail, error)
 	getStudentFn                func(ctx context.Context, id uuid.UUID) (StudentDetail, error)
-	listStudentsFn               func(ctx context.Context, f ListFilter) ([]db.ListStudentsRow, int64, error)
+	listStudentsFn              func(ctx context.Context, f ListFilter) ([]db.ListStudentsRow, int64, error)
 	updateStudentFn             func(ctx context.Context, actorID, id uuid.UUID, in UpdateStudentInput) (StudentDetail, error)
 	setStatusFn                 func(ctx context.Context, actorID, id uuid.UUID, status string) (StudentDetail, error)
 	linkGuardianToStudentFn     func(ctx context.Context, actorID, studentID uuid.UUID, in LinkGuardianInput) ([]db.ListGuardiansForStudentRow, error)
@@ -31,6 +32,7 @@ type stubService struct {
 	getGuardianFn               func(ctx context.Context, id uuid.UUID) (GuardianDetail, error)
 	listGuardiansFn             func(ctx context.Context, f GuardianListFilter) ([]db.ListGuardiansRow, int64, error)
 	updateGuardianFn            func(ctx context.Context, actorID, id uuid.UUID, in UpdateGuardianInput) (GuardianDetail, error)
+	createGuardianAccountFn     func(ctx context.Context, actorID, guardianID uuid.UUID, in GuardianAccountInput) error
 }
 
 func (s *stubService) CreateStudent(ctx context.Context, actorID uuid.UUID, in CreateStudentInput) (StudentDetail, error) {
@@ -110,6 +112,13 @@ func (s *stubService) UpdateGuardian(ctx context.Context, actorID, id uuid.UUID,
 	return s.updateGuardianFn(ctx, actorID, id, in)
 }
 
+func (s *stubService) CreateGuardianAccount(ctx context.Context, actorID, guardianID uuid.UUID, in GuardianAccountInput) error {
+	if s.createGuardianAccountFn == nil {
+		panic("unexpected CreateGuardianAccount call")
+	}
+	return s.createGuardianAccountFn(ctx, actorID, guardianID, in)
+}
+
 const testActorID = "11111111-1111-1111-1111-111111111111"
 
 func newTestRouter(svc ServiceAPI) *gin.Engine {
@@ -135,8 +144,86 @@ func newTestRouter(svc ServiceAPI) *gin.Engine {
 	r.GET("/guardians/:id", h.GetGuardian)
 	r.POST("/guardians", h.CreateGuardian)
 	r.PATCH("/guardians/:id", h.UpdateGuardian)
+	r.POST("/guardians/:id/account", h.CreateGuardianAccount)
 
 	return r
+}
+
+func TestCreateGuardianAccountHandler(t *testing.T) {
+	actorID := uuid.MustParse(testActorID)
+	guardianID := uuid.New()
+
+	var gotActor, gotGuardian uuid.UUID
+	var gotInput GuardianAccountInput
+	svc := &stubService{
+		createGuardianAccountFn: func(ctx context.Context, a, g uuid.UUID, in GuardianAccountInput) error {
+			gotActor, gotGuardian, gotInput = a, g, in
+			return nil
+		},
+	}
+	r := newTestRouter(svc)
+
+	req := httptest.NewRequest(http.MethodPost, "/guardians/"+guardianID.String()+"/account",
+		strings.NewReader(`{"email":"parent@example.test","password":"ParentPass2026!"}`))
+	req.Header.Set("Content-Type", "application/json")
+	rec := httptest.NewRecorder()
+	r.ServeHTTP(rec, req)
+
+	if rec.Code != http.StatusCreated {
+		t.Fatalf("expected 201, got %d: %s", rec.Code, rec.Body.String())
+	}
+	if gotActor != actorID || gotGuardian != guardianID {
+		t.Fatalf("actor/guardian = %v/%v, want %v/%v", gotActor, gotGuardian, actorID, guardianID)
+	}
+	// Role is forced to PARENT regardless of what the client sends.
+	if gotInput.Email != "parent@example.test" || gotInput.RoleName != "PARENT" {
+		t.Fatalf("input = %+v", gotInput)
+	}
+}
+
+func TestCreateGuardianAccountHandler_RejectsNonParentRole(t *testing.T) {
+	svc := &stubService{
+		createGuardianAccountFn: func(ctx context.Context, a, g uuid.UUID, in GuardianAccountInput) error {
+			t.Error("service should not be reached")
+			return nil
+		},
+	}
+	r := newTestRouter(svc)
+
+	req := httptest.NewRequest(http.MethodPost, "/guardians/"+uuid.New().String()+"/account",
+		strings.NewReader(`{"email":"parent@example.test","password":"ParentPass2026!","role":"ADMIN"}`))
+	req.Header.Set("Content-Type", "application/json")
+	rec := httptest.NewRecorder()
+	r.ServeHTTP(rec, req)
+
+	if rec.Code != http.StatusBadRequest {
+		t.Fatalf("expected 400, got %d: %s", rec.Code, rec.Body.String())
+	}
+	if !strings.Contains(rec.Body.String(), "VALIDATION_ERROR") {
+		t.Fatalf("expected VALIDATION_ERROR, got %s", rec.Body.String())
+	}
+}
+
+func TestCreateGuardianAccountHandler_MapsServiceErrors(t *testing.T) {
+	svc := &stubService{
+		createGuardianAccountFn: func(ctx context.Context, a, g uuid.UUID, in GuardianAccountInput) error {
+			return ErrEmailTaken
+		},
+	}
+	r := newTestRouter(svc)
+
+	req := httptest.NewRequest(http.MethodPost, "/guardians/"+uuid.New().String()+"/account",
+		strings.NewReader(`{"email":"parent@example.test","password":"ParentPass2026!"}`))
+	req.Header.Set("Content-Type", "application/json")
+	rec := httptest.NewRecorder()
+	r.ServeHTTP(rec, req)
+
+	if rec.Code != http.StatusConflict {
+		t.Fatalf("expected 409, got %d: %s", rec.Code, rec.Body.String())
+	}
+	if !strings.Contains(rec.Body.String(), "EMAIL_TAKEN") {
+		t.Fatalf("expected EMAIL_TAKEN, got %s", rec.Body.String())
+	}
 }
 
 func TestListStudentsHandler(t *testing.T) {
@@ -166,7 +253,7 @@ func TestListStudentsHandler(t *testing.T) {
 	}
 
 	var resp struct {
-		Students []studentListItemDTO `json:"students"`
+		Students   []studentListItemDTO `json:"students"`
 		Pagination struct {
 			Total int64 `json:"total"`
 		} `json:"pagination"`

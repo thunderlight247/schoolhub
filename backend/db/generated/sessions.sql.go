@@ -76,6 +76,30 @@ func (q *Queries) DeleteExpiredSessions(ctx context.Context) error {
 	return err
 }
 
+const deleteOtherSessionsForUser = `-- name: DeleteOtherSessionsForUser :execrows
+DELETE FROM sessions
+WHERE user_id = $1
+  AND token_hash <> $2
+  AND expires_at > now()
+`
+
+type DeleteOtherSessionsForUserParams struct {
+	UserID    uuid.UUID `json:"user_id"`
+	TokenHash string    `json:"token_hash"`
+}
+
+// M34: after a password change, every OTHER session for this user is
+// invalid (another device may still hold the bootstrap password's session).
+// The caller passes its own session's token hash so the active device
+// stays signed in; only non-expired rows are touched.
+func (q *Queries) DeleteOtherSessionsForUser(ctx context.Context, arg DeleteOtherSessionsForUserParams) (int64, error) {
+	result, err := q.db.Exec(ctx, deleteOtherSessionsForUser, arg.UserID, arg.TokenHash)
+	if err != nil {
+		return 0, err
+	}
+	return result.RowsAffected(), nil
+}
+
 const deleteSession = `-- name: DeleteSession :exec
 DELETE FROM sessions
 WHERE token_hash = $1

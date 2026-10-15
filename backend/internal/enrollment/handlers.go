@@ -58,6 +58,7 @@ type enrollmentListItemDTO struct {
 	EnrollmentDate   string  `json:"enrollment_date"`
 	ExitDate         *string `json:"exit_date,omitempty"`
 	Notes            *string `json:"notes,omitempty"`
+	StudentNumber    string  `json:"student_number,omitempty"`
 	StudentName      string  `json:"student_name,omitempty"`
 	AcademicYearName string  `json:"academic_year_name,omitempty"`
 	ClassName        string  `json:"class_name,omitempty"`
@@ -122,6 +123,7 @@ func toEnrollmentListItemDTO(row db.ListEnrollmentsRow) enrollmentListItemDTO {
 		EnrollmentDate:   row.EnrollmentDate.Time.Format("2006-01-02"),
 		ExitDate:         exitDate,
 		Notes:            notes,
+		StudentNumber:    row.StudentNumber,
 		StudentName:      valueString(row.StudentName),
 		AcademicYearName: valueString(row.AcademicYearName),
 		ClassName:        row.ClassName,

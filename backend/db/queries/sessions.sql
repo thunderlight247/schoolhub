@@ -27,3 +27,13 @@ WHERE user_id = $1;
 -- regardless; this just reclaims the rows.
 DELETE FROM sessions
 WHERE expires_at < now();
+
+-- name: DeleteOtherSessionsForUser :execrows
+-- M34: after a password change, every OTHER session for this user is
+-- invalid (another device may still hold the bootstrap password's session).
+-- The caller passes its own session's token hash so the active device
+-- stays signed in; only non-expired rows are touched.
+DELETE FROM sessions
+WHERE user_id = sqlc.arg(user_id)
+  AND token_hash <> sqlc.arg(token_hash)
+  AND expires_at > now();

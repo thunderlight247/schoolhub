@@ -15,9 +15,20 @@ frontend/next-env.d.ts
 backend/schoolhub-server
 backend/tmp/
 backend/cookies.txt
+backend/server
+backend/demo-seed
+backend/*.zip
+
+# Editor/scratch leftovers
+.~lock.*#
+frontend/.env.local.bak
+
+# Cloudflare wrangler local state
+frontend/.wrangler/
 
 # OS / editor
 .DS_Store
 *.log
 .vscode/
 .idea/
+.check-credentials.json

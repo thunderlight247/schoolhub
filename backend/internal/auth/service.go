@@ -45,10 +45,14 @@ func NewService(queries db.Querier) *Service {
 // convenience/UX (e.g. rendering the right navigation), never a substitute
 // for the middleware check.
 type AuthenticatedUser struct {
-	User        db.User
-	Person      db.Person
-	Roles       []string
-	Permissions []string
+	User   db.User
+	Person db.Person
+	// SessionTokenHash is the SHA-256 hash of the presented session token
+	// (M34): the password-change flow uses it to invalidate every OTHER
+	// session for the same account without logging the active device out.
+	SessionTokenHash string
+	Roles            []string
+	Permissions      []string
 }
 
 // loadAuthorization resolves the user's role names and effective permission
@@ -168,7 +172,11 @@ func (s *Service) ValidateSession(ctx context.Context, token string) (Authentica
 		return AuthenticatedUser{}, ErrSessionInvalid
 	}
 
-	authUser, err := s.loadAuthorization(ctx, AuthenticatedUser{User: user, Person: person})
+	authUser, err := s.loadAuthorization(ctx, AuthenticatedUser{
+		User:             user,
+		Person:           person,
+		SessionTokenHash: HashToken(token),
+	})
 	if err != nil {
 		// Fail closed: a transient failure resolving permissions rejects the
 		// request (mapped to 401 by RequireAuth) rather than serving it with

@@ -281,14 +281,16 @@ type Term struct {
 }
 
 type User struct {
-	ID           uuid.UUID          `json:"id"`
-	PersonID     uuid.UUID          `json:"person_id"`
-	Email        string             `json:"email"`
-	PasswordHash string             `json:"password_hash"`
-	Status       string             `json:"status"`
-	LastLoginAt  pgtype.Timestamptz `json:"last_login_at"`
-	CreatedAt    pgtype.Timestamptz `json:"created_at"`
-	UpdatedAt    pgtype.Timestamptz `json:"updated_at"`
+	ID                 uuid.UUID          `json:"id"`
+	PersonID           uuid.UUID          `json:"person_id"`
+	Email              string             `json:"email"`
+	PasswordHash       string             `json:"password_hash"`
+	Status             string             `json:"status"`
+	LastLoginAt        pgtype.Timestamptz `json:"last_login_at"`
+	CreatedAt          pgtype.Timestamptz `json:"created_at"`
+	UpdatedAt          pgtype.Timestamptz `json:"updated_at"`
+	MustChangePassword bool               `json:"must_change_password"`
+	InvitedBy          pgtype.UUID        `json:"invited_by"`
 }
 
 type UserRole struct {

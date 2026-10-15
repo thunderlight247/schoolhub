@@ -18,6 +18,15 @@ type Querier interface {
 	// Used by the admin "replace a user's roles" flow (M6): the transaction
 	// deletes all current rows then re-assigns the requested set atomically.
 	ClearUserRoles(ctx context.Context, userID uuid.UUID) error
+	// Last-master guard for the blocking rules (M34): how many OTHER users are
+	// ACTIVE masters — zero means the candidate is the only one and must not
+	// be suspended.
+	CountActiveMasterAdminsExcept(ctx context.Context, excludeUserID uuid.UUID) (int64, error)
+	// Active holders of the ADMIN role — the guard against revoking the last
+	// one. MASTER_ADMIN holders count: a master admin may not *revoke their
+	// own* admin powers anyway (service check), but any actively-serving
+	// admin keeps the system manageable.
+	CountAdmins(ctx context.Context) (int64, error)
 	CountAnnouncements(ctx context.Context, arg CountAnnouncementsParams) (int64, error)
 	// Must stay in sync with ListAssessments' WHERE clause (see the comment
 	// there).
@@ -25,6 +34,11 @@ type Querier interface {
 	// Must stay in sync with ListAttendanceSessions' WHERE clause (see the
 	// comment there).
 	CountAttendanceSessions(ctx context.Context, arg CountAttendanceSessionsParams) (int64, error)
+	// Must stay in sync with ListAuditLogs' WHERE clause.
+	CountAuditLogs(ctx context.Context, arg CountAuditLogsParams) (int64, error)
+	// Active role holders in a given role, same "don't lock the system out"
+	// guard when blocking accounts.
+	CountByRole(ctx context.Context, roleName string) (int64, error)
 	CountEnrollments(ctx context.Context, arg CountEnrollmentsParams) (int64, error)
 	CountFeedAnnouncements(ctx context.Context, authorID uuid.UUID) (int64, error)
 	CountGuardians(ctx context.Context, search pgtype.Text) (int64, error)
@@ -77,6 +91,11 @@ type Querier interface {
 	// Expired sessions are already rejected by ValidateSession's expiry check
 	// regardless; this just reclaims the rows.
 	DeleteExpiredSessions(ctx context.Context) error
+	// M34: after a password change, every OTHER session for this user is
+	// invalid (another device may still hold the bootstrap password's session).
+	// The caller passes its own session's token hash so the active device
+	// stays signed in; only non-expired rows are touched.
+	DeleteOtherSessionsForUser(ctx context.Context, arg DeleteOtherSessionsForUserParams) (int64, error)
 	DeleteSession(ctx context.Context, tokenHash string) error
 	DeleteTeacherAssignment(ctx context.Context, id uuid.UUID) error
 	GetAcademicYearByID(ctx context.Context, id uuid.UUID) (AcademicYear, error)
@@ -91,17 +110,42 @@ type Querier interface {
 	// The register header with everything the UI shows in one round trip:
 	// class + its academic year, subject, and the term it was captured in.
 	GetAttendanceSessionByID(ctx context.Context, id uuid.UUID) (GetAttendanceSessionByIDRow, error)
+	GetAuditLogByID(ctx context.Context, id uuid.UUID) (GetAuditLogByIDRow, error)
 	// Recent attendance marks for one child with full session context (date,
 	// class, subject, term) — the per-child register view in the portal. Keeps
 	// history readable even after the child's enrollment ended (marks stay).
 	GetChildRecentAttendanceRecords(ctx context.Context, arg GetChildRecentAttendanceRecordsParams) ([]GetChildRecentAttendanceRecordsRow, error)
+	// Assessment performance metrics for a class and term (average, high, low, submissions).
+	GetClassAssessmentPerformanceReport(ctx context.Context, arg GetClassAssessmentPerformanceReportParams) ([]GetClassAssessmentPerformanceReportRow, error)
+	// Total sessions held for a class within the given term or date window.
+	GetClassAttendanceSessionCount(ctx context.Context, arg GetClassAttendanceSessionCountParams) (int64, error)
+	// Per-student attendance breakdown for a class in a given term or date window.
+	GetClassAttendanceSummaryReport(ctx context.Context, arg GetClassAttendanceSummaryReportParams) ([]GetClassAttendanceSummaryReportRow, error)
 	GetClassByID(ctx context.Context, id uuid.UUID) (GetClassByIDRow, error)
 	GetClassRosterForTeacher(ctx context.Context, classID uuid.UUID) ([]GetClassRosterForTeacherRow, error)
 	GetCurrentAcademicYear(ctx context.Context) (AcademicYear, error)
 	GetCurrentAcademicYearAndTerm(ctx context.Context) (GetCurrentAcademicYearAndTermRow, error)
+	// The student's currently-active enrollment (latest ENROLLED history record)
+	// with class, programme, and academic year context for the overview header.
+	// Same LATERAL pattern as ListChildrenForGuardianUser in parent_portal.sql so
+	// multiple ENROLLED history rows (one per year, allowed by migration 000009)
+	// never duplicate; a student without an active enrollment yields pgx.ErrNoRows
+	// and the service omits the enrollment block.
+	GetCurrentEnrollmentForStudent(ctx context.Context, studentID uuid.UUID) (GetCurrentEnrollmentForStudentRow, error)
 	GetCurrentTerm(ctx context.Context) (GetCurrentTermRow, error)
 	GetDepartmentByID(ctx context.Context, id uuid.UUID) (Department, error)
 	GetEnrollmentByID(ctx context.Context, id uuid.UUID) (GetEnrollmentByIDRow, error)
+	// Reports domain (milestone M18).
+	// Institutional and academic reporting queries: enrollment summaries,
+	// class attendance analytics, class performance distribution, and
+	// terminal student report cards.
+	// Access is gated under the report.view permission.
+	// Institutional enrollment report per class with capacity utilization and
+	// gender breakdown across the school for an academic year.
+	GetEnrollmentReport(ctx context.Context, academicYearID pgtype.UUID) ([]GetEnrollmentReportRow, error)
+	// Also LEFT JOINs the guardian's optional login account (users is 1:1 with
+	// people) so the profile page can show whether parent access exists and
+	// what state it's in without a second round-trip.
 	GetGuardianByID(ctx context.Context, id uuid.UUID) (GetGuardianByIDRow, error)
 	// Parent portal (milestone M16). Read-only aggregation over the guardian
 	// domain (M7), enrollment history (M9), attendance (M11), results (M12), and
@@ -140,12 +184,44 @@ type Querier interface {
 	// struct for a LEFT JOINed users row.
 	GetStaffByID(ctx context.Context, id uuid.UUID) (GetStaffByIDRow, error)
 	GetStaffPositionByID(ctx context.Context, id uuid.UUID) (StaffPosition, error)
+	// Lifetime per-status mark breakdown for the overview attendance card.
+	GetStudentAttendanceCounts(ctx context.Context, studentID uuid.UUID) (GetStudentAttendanceCountsRow, error)
+	// Attendance summary for a student within a specific term.
+	GetStudentAttendanceForTerm(ctx context.Context, arg GetStudentAttendanceForTermParams) (GetStudentAttendanceForTermRow, error)
 	GetStudentByID(ctx context.Context, id uuid.UUID) (GetStudentByIDRow, error)
 	// Fallback identity lookup for GetChildDetail: a child who is linked to the
 	// guardian but currently has no ENROLLED history row (and thus no row in
 	// ListChildrenForGuardianUser's LATERAL join) still gets a readable shell
 	// instead of a 404. Scoped by the same guardian link as the access gate.
 	GetStudentIdentityForGuardian(ctx context.Context, arg GetStudentIdentityForGuardianParams) (GetStudentIdentityForGuardianRow, error)
+	// Student portal (milestone M17). Read-only, self-scoped aggregation over the
+	// students domain (M7), enrollment history (M9), attendance (M11), results
+	// (M12), and announcements (M13). No schema of its own — mirrors M14 (admin
+	// dashboard), M15 (teacher portal), and M16 (parent portal).
+	//
+	// Row-level scoping note (flagged in migration 000004's comments): a STUDENT
+	// account may only read its own records, so every query here is anchored on
+	// the student row resolved from the authenticated user's person_id — there is
+	// no endpoint that takes a student id at all.
+	// Resolve the student record behind a STUDENT-role account, mirroring
+	// GetGuardianProfileByUserID in parent_portal.sql. A student user is a person
+	// with a students row; the INNER JOINs mean a non-student account yields
+	// pgx.ErrNoRows, which the service maps to a friendly 404.
+	GetStudentProfileByUserID(ctx context.Context, id uuid.UUID) (GetStudentProfileByUserIDRow, error)
+	// The student's own recent attendance marks with full session context (date,
+	// class, subject, term) — mirrors GetChildRecentAttendanceRecords in
+	// parent_portal.sql, named for this domain since the row shape is identical
+	// but the anchor (self, not a linked child) is not.
+	GetStudentRecentAttendanceRecords(ctx context.Context, arg GetStudentRecentAttendanceRecordsParams) ([]GetStudentRecentAttendanceRecordsRow, error)
+	// Header metadata for a student terminal report card.
+	GetStudentReportCardProfile(ctx context.Context, arg GetStudentReportCardProfileParams) (GetStudentReportCardProfileRow, error)
+	// Results headline for the overview card. avg() over zero rows is NULL and is
+	// COALESCEd to 0; the service only surfaces the average when results_count
+	// > 0, keeping "no results" and "0 average" distinguishable (same approach as
+	// ListChildrenForGuardianUser in parent_portal.sql).
+	GetStudentResultsSummary(ctx context.Context, studentID uuid.UUID) (GetStudentResultsSummaryRow, error)
+	// Subject-level aggregates for a student in a specific class and term.
+	GetStudentSubjectResultsForReportCard(ctx context.Context, arg GetStudentSubjectResultsForReportCardParams) ([]GetStudentSubjectResultsForReportCardRow, error)
 	GetSubjectByCode(ctx context.Context, code string) (Subject, error)
 	GetSubjectByID(ctx context.Context, id uuid.UUID) (GetSubjectByIDRow, error)
 	GetTeacherAssessmentsSummary(ctx context.Context, arg GetTeacherAssessmentsSummaryParams) ([]GetTeacherAssessmentsSummaryRow, error)
@@ -181,6 +257,18 @@ type Querier interface {
 	IsTeacherAssignedToClass(ctx context.Context, arg IsTeacherAssignedToClassParams) (bool, error)
 	LinkGuardianToStudent(ctx context.Context, arg LinkGuardianToStudentParams) (StudentGuardian, error)
 	ListAcademicYears(ctx context.Context) ([]AcademicYear, error)
+	// Account directory for the access-control screen: everyone holding a
+	// chosen role with their account status. role_name is passed as TEXT
+	// rather than a uuid to keep the frontend simple (roles are a fixed set).
+	ListAccountsWithRole(ctx context.Context, roleName string) ([]ListAccountsWithRoleRow, error)
+	// Admin-account management (expert pass follow-up). Queries behind the
+	// admin.manage (list/grant/revoke admins) and account.block (suspend/
+	// restore any login account) endpoints. Kept in their own query file —
+	// like invitation_tokens.sql, attention here is narrow and permission-
+	// sensitive, so the SQL lives apart from the big domain files.
+	// Everyone currently holding the ADMIN or MASTER_ADMIN role, with account
+	// status so the master admin can spot suspended admins at a glance.
+	ListAdmins(ctx context.Context) ([]ListAdminsRow, error)
 	ListAllTerms(ctx context.Context) ([]ListAllTermsRow, error)
 	ListAnnouncements(ctx context.Context, arg ListAnnouncementsParams) ([]ListAnnouncementsRow, error)
 	// The score sheet: every student's result for one assessment, roster order
@@ -198,6 +286,15 @@ type Querier interface {
 	// this WHERE clause and CountAttendanceSessions' in sync — see the same
 	// note on ListTeacherAssignments.
 	ListAttendanceSessions(ctx context.Context, arg ListAttendanceSessionsParams) ([]ListAttendanceSessionsRow, error)
+	// M19: authorized admin audit review (section 19/29). Read-only queries
+	// against the same append-only table CreateAuditLog writes to.
+	// Paginated, filtered audit log (section 25's pagination discipline
+	// applies here too). Actor is resolved via a join to users/people so the
+	// frontend doesn't need a second round trip per row to show "who did
+	// this" — LEFT JOIN because actor_user_id is nullable (migration 000006:
+	// system actions have no actor, and a removed user's historical entries
+	// survive via ON DELETE SET NULL).
+	ListAuditLogs(ctx context.Context, arg ListAuditLogsParams) ([]ListAuditLogsRow, error)
 	// One row per child linked to this guardian, with their currently-active
 	// enrollment (latest ENROLLED history record) and lifetime attendance /
 	// results aggregates for the overview cards. The LATERAL join picks a single
@@ -212,6 +309,10 @@ type Querier interface {
 	ListChildrenForGuardianUser(ctx context.Context, guardianID uuid.UUID) ([]ListChildrenForGuardianUserRow, error)
 	ListClasses(ctx context.Context, arg ListClassesParams) ([]ListClassesRow, error)
 	ListDepartments(ctx context.Context) ([]Department, error)
+	// Backs a frontend filter dropdown with the action codes that actually
+	// appear in the log, rather than hardcoding the full set client-side —
+	// that set has grown with every milestone since M6 and will keep growing.
+	ListDistinctAuditActions(ctx context.Context) ([]string, error)
 	ListEnrollments(ctx context.Context, arg ListEnrollmentsParams) ([]ListEnrollmentsRow, error)
 	ListFeedAnnouncements(ctx context.Context, arg ListFeedAnnouncementsParams) ([]ListFeedAnnouncementsRow, error)
 	// Backs the "search existing guardian to link" workflow as well as a
@@ -235,6 +336,9 @@ type Querier interface {
 	// be correct.
 	ListStaff(ctx context.Context, arg ListStaffParams) ([]ListStaffRow, error)
 	ListStaffPositions(ctx context.Context) ([]StaffPosition, error)
+	// The student's full enrollment history across academic years and classes,
+	// ordered newest to oldest.
+	ListStudentEnrollments(ctx context.Context, studentID uuid.UUID) ([]ListStudentEnrollmentsRow, error)
 	// One student's results across assessments — the read groundwork the
 	// parent (M16) and student (M17) portals render. Optional term/year
 	// filters scope the window; without them this is the full history.
@@ -251,6 +355,9 @@ type Querier interface {
 	// CountTeacherAssignments' in sync — see the same note on ListStaff.
 	ListTeacherAssignments(ctx context.Context, arg ListTeacherAssignmentsParams) ([]ListTeacherAssignmentsRow, error)
 	ListTermsForAcademicYear(ctx context.Context, academicYearID uuid.UUID) ([]ListTermsForAcademicYearRow, error)
+	// GET /my-invitees: the accounts the caller personally provisioned,
+	// together with their current role + status for the /access section.
+	ListUsersInvitedBy(ctx context.Context, invitedBy pgtype.UUID) ([]ListUsersInvitedByRow, error)
 	MarkInvitationTokenAccepted(ctx context.Context, id uuid.UUID) error
 	MarkPasswordResetTokenUsed(ctx context.Context, id uuid.UUID) error
 	RecordUserLogin(ctx context.Context, id uuid.UUID) error
@@ -264,6 +371,16 @@ type Querier interface {
 	SetStaffEmploymentStatus(ctx context.Context, arg SetStaffEmploymentStatusParams) (Staff, error)
 	SetStudentStatus(ctx context.Context, arg SetStudentStatusParams) (Student, error)
 	SetTermCurrent(ctx context.Context, id uuid.UUID) (Term, error)
+	// M34: inviter tracking — every provisioned login (admin/staff/parent
+	// account) stores who minted it, powering "see your invitees" and
+	// inviter-block rights without a separate table. Admins re-provisioning
+	// themselves? services refuse self-provisioning, so no self-cycle.
+	SetUserInvitedBy(ctx context.Context, arg SetUserInvitedByParams) error
+	// M34: bootstrap accounts (the master admin) are provisioned with a
+	// temporary password the developer knows; the flag forces a change at the
+	// first login (the auth middleware rejects everything but change/logout/me
+	// while it is set) so the bootstrap credential cannot be reused afterwards.
+	SetUserMustChangePassword(ctx context.Context, arg SetUserMustChangePasswordParams) error
 	// Per-status mark counts for one class — the teacher's register overview.
 	// subject_id optionally narrows to one teaching slot; term_id scopes to a
 	// term.

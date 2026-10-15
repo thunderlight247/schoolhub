@@ -18,8 +18,10 @@ import (
 	"github.com/google/uuid"
 	"github.com/jackc/pgx/v5"
 	"github.com/jackc/pgx/v5/pgconn"
+
 	"github.com/jackc/pgx/v5/pgtype"
 	"github.com/jackc/pgx/v5/pgxpool"
+	"github.com/thunderlight247/schoolhub/backend/internal/email"
 
 	db "github.com/thunderlight247/schoolhub/backend/db/generated"
 	"github.com/thunderlight247/schoolhub/backend/internal/audit"
@@ -76,10 +78,35 @@ var (
 type Service struct {
 	pool    *pgxpool.Pool
 	queries *db.Queries
+	// mailer is optional (nil in tests and in deployments without an
+	// email provider): a broken email provider must never prevent an
+	// admin from creating an account — the email send is best-effort and
+	// lives AFTER the transaction commits.
+	mailer email.Sender
+	// inviter is optional (nil without Clerk): when set, account creation
+	// also asks Clerk to email an official invitation for the same
+	// address — best-effort, after commit.
+	inviter *auth.ClerkInviter
+	// frontendURL is used to build the sign-in link in the welcome email.
+	frontendURL string
 }
 
 func NewService(pool *pgxpool.Pool) *Service {
 	return &Service{pool: pool, queries: db.New(pool)}
+}
+
+// SetMailer attaches an optional email sender (and the frontend URL used
+// in welcome-email links). Safe to call once during wiring.
+func (s *Service) SetMailer(mailer email.Sender, frontendURL string) {
+	s.mailer = mailer
+	if frontendURL != "" {
+		s.frontendURL = frontendURL
+	}
+}
+
+// SetInviter attaches the optional Clerk invitation issuer.
+func (s *Service) SetInviter(inviter *auth.ClerkInviter) {
+	s.inviter = inviter
 }
 
 // Account is the user-account view attached to a staff member (nil until
@@ -573,6 +600,13 @@ func (s *Service) CreateAccount(ctx context.Context, actorID, staffID uuid.UUID,
 		}
 		return Account{}, err
 	}
+	// M34: record who provisioned this staff account (inviter tracking).
+	if err := q.SetUserInvitedBy(ctx, db.SetUserInvitedByParams{
+		ID:        user.ID,
+		InvitedBy: pgtype.UUID{Bytes: actorID, Valid: true},
+	}); err != nil {
+		return Account{}, err
+	}
 
 	for _, name := range in.RoleNames {
 		role, err := q.GetRoleByName(ctx, name)
@@ -608,6 +642,38 @@ func (s *Service) CreateAccount(ctx context.Context, actorID, staffID uuid.UUID,
 	if detail.Account == nil {
 		return Account{}, ErrUserNotFound
 	}
+
+	// Best-effort welcome email (after commit — never blocks or fails the
+	// account creation itself). No-op when no provider is configured.
+	if svc, ok := s.mailer.(*email.Service); ok && svc != nil && svc.Enabled() {
+		firstName := detail.Row.FirstName
+		lastName := detail.Row.LastName
+		to := in.Email
+		go func() {
+			mailCtx, cancel := context.WithTimeout(context.Background(), 15*time.Second)
+			defer cancel()
+			signIn := s.frontendURL
+			if signIn == "" {
+				signIn = "http://localhost:3000/login"
+			}
+			if err := svc.SendWelcome(mailCtx, to, firstName+" "+lastName, signIn); err != nil {
+				// Already logged inside the service; nothing more to do.
+			}
+		}()
+	}
+
+	// Best-effort Clerk invitation (after commit): the recipient gets the
+	// official "create your password" email for this same address; the
+	// bridge matches them by email on first sign-in. No-op when Clerk is
+	// not configured.
+	if s.inviter != nil && s.inviter.Enabled() {
+		go func(addr string) {
+			ictx, cancel := context.WithTimeout(context.Background(), 15*time.Second)
+			defer cancel()
+			s.inviter.Create(ictx, addr)
+		}(in.Email)
+	}
+
 	return *detail.Account, nil
 }
 

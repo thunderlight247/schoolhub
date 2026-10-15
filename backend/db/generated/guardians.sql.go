@@ -68,28 +68,38 @@ SELECT
     p.gender,
     p.phone,
     p.email,
-    p.address
+    p.address,
+    u.id          AS account_id,
+    u.email       AS account_email,
+    u.status      AS account_status
 FROM guardians g
 JOIN people p ON p.id = g.person_id
+LEFT JOIN users u ON u.person_id = p.id
 WHERE g.id = $1
 `
 
 type GetGuardianByIDRow struct {
-	ID          uuid.UUID          `json:"id"`
-	PersonID    uuid.UUID          `json:"person_id"`
-	Occupation  pgtype.Text        `json:"occupation"`
-	CreatedAt   pgtype.Timestamptz `json:"created_at"`
-	UpdatedAt   pgtype.Timestamptz `json:"updated_at"`
-	FirstName   string             `json:"first_name"`
-	LastName    string             `json:"last_name"`
-	OtherNames  pgtype.Text        `json:"other_names"`
-	DateOfBirth pgtype.Date        `json:"date_of_birth"`
-	Gender      pgtype.Text        `json:"gender"`
-	Phone       pgtype.Text        `json:"phone"`
-	Email       pgtype.Text        `json:"email"`
-	Address     pgtype.Text        `json:"address"`
+	ID            uuid.UUID          `json:"id"`
+	PersonID      uuid.UUID          `json:"person_id"`
+	Occupation    pgtype.Text        `json:"occupation"`
+	CreatedAt     pgtype.Timestamptz `json:"created_at"`
+	UpdatedAt     pgtype.Timestamptz `json:"updated_at"`
+	FirstName     string             `json:"first_name"`
+	LastName      string             `json:"last_name"`
+	OtherNames    pgtype.Text        `json:"other_names"`
+	DateOfBirth   pgtype.Date        `json:"date_of_birth"`
+	Gender        pgtype.Text        `json:"gender"`
+	Phone         pgtype.Text        `json:"phone"`
+	Email         pgtype.Text        `json:"email"`
+	Address       pgtype.Text        `json:"address"`
+	AccountID     pgtype.UUID        `json:"account_id"`
+	AccountEmail  pgtype.Text        `json:"account_email"`
+	AccountStatus pgtype.Text        `json:"account_status"`
 }
 
+// Also LEFT JOINs the guardian's optional login account (users is 1:1 with
+// people) so the profile page can show whether parent access exists and
+// what state it's in without a second round-trip.
 func (q *Queries) GetGuardianByID(ctx context.Context, id uuid.UUID) (GetGuardianByIDRow, error) {
 	row := q.db.QueryRow(ctx, getGuardianByID, id)
 	var i GetGuardianByIDRow
@@ -107,6 +117,9 @@ func (q *Queries) GetGuardianByID(ctx context.Context, id uuid.UUID) (GetGuardia
 		&i.Phone,
 		&i.Email,
 		&i.Address,
+		&i.AccountID,
+		&i.AccountEmail,
+		&i.AccountStatus,
 	)
 	return i, err
 }

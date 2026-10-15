@@ -1,0 +1,51 @@
+---
+# Render Blueprint for the SchoolHub API (M35 demo deployment).
+#
+# Deploy: from the Render dashboard "New + > Blueprint", point it at this
+# repository — Render reads render.yaml and creates the service below.
+# Secrets marked sync: false are filled in on the dashboard (Environment
+# tab), never in this file.
+#
+# Frontend (Cloudflare Pages) is deployed separately — see README
+# "Deploying the demo (M35)" for the full order of operations.
+#
+# DATABASE_URL must be the Neon *pooled* connection string (endpoint
+# containing "pooler") with sslmode=require, e.g.
+#   postgres://schoolhub_owner:PASS@ep-xxx-123.region.aws.neon.tech/schoolhub?sslmode=require
+#
+# COOKIE_SAMESITE=none is required here: the Pages frontend (*.pages.dev)
+# and this API (*.onrender.com) are different registrable domains, and a
+# Lax session cookie set in a cross-site fetch response is dropped by the
+# browser. Load() enforces that "none" only runs under APP_ENV=production,
+# which this file sets.
+services:
+  - type: web
+    name: schoolhub-api
+    runtime: docker
+    dockerContext: ./backend
+    dockerfilePath: ./backend/Dockerfile
+    plan: free
+    healthCheckPath: /api/v1/health
+    autoDeploy: true
+    envVars:
+      - key: APP_ENV
+        value: production
+      - key: PORT
+        value: "8080"
+      - key: COOKIE_SAMESITE
+        value: none
+      # After the Pages deploy gives you the final URL
+      # (https://<project>.pages.dev), replace this placeholder with that
+      # exact origin — CORS echoes it back verbatim.
+      - key: FRONTEND_URL
+        sync: false
+      # Neon pooled connection string, sslmode=require. Sensitive: dashboard-only.
+      - key: DATABASE_URL
+        sync: false
+      # Demo runs classic email/password sessions; no Clerk bridge mounted
+      # when this stays empty. Email (Resend) stays off: empty key
+      # disables sending entirely.
+      - key: CLERK_SECRET_KEY
+        sync: false
+      - key: RESEND_API_KEY
+        sync: false

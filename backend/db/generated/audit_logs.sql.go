@@ -8,8 +8,45 @@ package db
 import (
 	"context"
 
+	"github.com/google/uuid"
 	"github.com/jackc/pgx/v5/pgtype"
 )
+
+const countAuditLogs = `-- name: CountAuditLogs :one
+SELECT count(*)
+FROM audit_logs a
+WHERE
+    ($1::uuid IS NULL OR a.actor_user_id = $1)
+    AND ($2::text IS NULL OR a.action = $2)
+    AND ($3::text IS NULL OR a.resource_type = $3)
+    AND ($4::uuid IS NULL OR a.resource_id = $4)
+    AND ($5::timestamptz IS NULL OR a.created_at >= $5)
+    AND ($6::timestamptz IS NULL OR a.created_at <= $6)
+`
+
+type CountAuditLogsParams struct {
+	ActorUserID  pgtype.UUID        `json:"actor_user_id"`
+	Action       pgtype.Text        `json:"action"`
+	ResourceType pgtype.Text        `json:"resource_type"`
+	ResourceID   pgtype.UUID        `json:"resource_id"`
+	DateFrom     pgtype.Timestamptz `json:"date_from"`
+	DateTo       pgtype.Timestamptz `json:"date_to"`
+}
+
+// Must stay in sync with ListAuditLogs' WHERE clause.
+func (q *Queries) CountAuditLogs(ctx context.Context, arg CountAuditLogsParams) (int64, error) {
+	row := q.db.QueryRow(ctx, countAuditLogs,
+		arg.ActorUserID,
+		arg.Action,
+		arg.ResourceType,
+		arg.ResourceID,
+		arg.DateFrom,
+		arg.DateTo,
+	)
+	var count int64
+	err := row.Scan(&count)
+	return count, err
+}
 
 const createAuditLog = `-- name: CreateAuditLog :exec
 INSERT INTO audit_logs (
@@ -40,4 +77,180 @@ func (q *Queries) CreateAuditLog(ctx context.Context, arg CreateAuditLogParams) 
 		arg.Metadata,
 	)
 	return err
+}
+
+const getAuditLogByID = `-- name: GetAuditLogByID :one
+SELECT
+    a.id,
+    a.actor_user_id,
+    a.action,
+    a.resource_type,
+    a.resource_id,
+    a.metadata,
+    a.created_at,
+    u.email AS actor_email,
+    p.first_name AS actor_first_name,
+    p.last_name AS actor_last_name
+FROM audit_logs a
+LEFT JOIN users u ON u.id = a.actor_user_id
+LEFT JOIN people p ON p.id = u.person_id
+WHERE a.id = $1
+`
+
+type GetAuditLogByIDRow struct {
+	ID             uuid.UUID          `json:"id"`
+	ActorUserID    pgtype.UUID        `json:"actor_user_id"`
+	Action         string             `json:"action"`
+	ResourceType   string             `json:"resource_type"`
+	ResourceID     pgtype.UUID        `json:"resource_id"`
+	Metadata       []byte             `json:"metadata"`
+	CreatedAt      pgtype.Timestamptz `json:"created_at"`
+	ActorEmail     pgtype.Text        `json:"actor_email"`
+	ActorFirstName pgtype.Text        `json:"actor_first_name"`
+	ActorLastName  pgtype.Text        `json:"actor_last_name"`
+}
+
+func (q *Queries) GetAuditLogByID(ctx context.Context, id uuid.UUID) (GetAuditLogByIDRow, error) {
+	row := q.db.QueryRow(ctx, getAuditLogByID, id)
+	var i GetAuditLogByIDRow
+	err := row.Scan(
+		&i.ID,
+		&i.ActorUserID,
+		&i.Action,
+		&i.ResourceType,
+		&i.ResourceID,
+		&i.Metadata,
+		&i.CreatedAt,
+		&i.ActorEmail,
+		&i.ActorFirstName,
+		&i.ActorLastName,
+	)
+	return i, err
+}
+
+const listAuditLogs = `-- name: ListAuditLogs :many
+
+SELECT
+    a.id,
+    a.actor_user_id,
+    a.action,
+    a.resource_type,
+    a.resource_id,
+    a.metadata,
+    a.created_at,
+    u.email AS actor_email,
+    p.first_name AS actor_first_name,
+    p.last_name AS actor_last_name
+FROM audit_logs a
+LEFT JOIN users u ON u.id = a.actor_user_id
+LEFT JOIN people p ON p.id = u.person_id
+WHERE
+    ($1::uuid IS NULL OR a.actor_user_id = $1)
+    AND ($2::text IS NULL OR a.action = $2)
+    AND ($3::text IS NULL OR a.resource_type = $3)
+    AND ($4::uuid IS NULL OR a.resource_id = $4)
+    AND ($5::timestamptz IS NULL OR a.created_at >= $5)
+    AND ($6::timestamptz IS NULL OR a.created_at <= $6)
+ORDER BY a.created_at DESC
+LIMIT $8
+OFFSET $7
+`
+
+type ListAuditLogsParams struct {
+	ActorUserID  pgtype.UUID        `json:"actor_user_id"`
+	Action       pgtype.Text        `json:"action"`
+	ResourceType pgtype.Text        `json:"resource_type"`
+	ResourceID   pgtype.UUID        `json:"resource_id"`
+	DateFrom     pgtype.Timestamptz `json:"date_from"`
+	DateTo       pgtype.Timestamptz `json:"date_to"`
+	PageOffset   int32              `json:"page_offset"`
+	PageLimit    int32              `json:"page_limit"`
+}
+
+type ListAuditLogsRow struct {
+	ID             uuid.UUID          `json:"id"`
+	ActorUserID    pgtype.UUID        `json:"actor_user_id"`
+	Action         string             `json:"action"`
+	ResourceType   string             `json:"resource_type"`
+	ResourceID     pgtype.UUID        `json:"resource_id"`
+	Metadata       []byte             `json:"metadata"`
+	CreatedAt      pgtype.Timestamptz `json:"created_at"`
+	ActorEmail     pgtype.Text        `json:"actor_email"`
+	ActorFirstName pgtype.Text        `json:"actor_first_name"`
+	ActorLastName  pgtype.Text        `json:"actor_last_name"`
+}
+
+// M19: authorized admin audit review (section 19/29). Read-only queries
+// against the same append-only table CreateAuditLog writes to.
+// Paginated, filtered audit log (section 25's pagination discipline
+// applies here too). Actor is resolved via a join to users/people so the
+// frontend doesn't need a second round trip per row to show "who did
+// this" — LEFT JOIN because actor_user_id is nullable (migration 000006:
+// system actions have no actor, and a removed user's historical entries
+// survive via ON DELETE SET NULL).
+func (q *Queries) ListAuditLogs(ctx context.Context, arg ListAuditLogsParams) ([]ListAuditLogsRow, error) {
+	rows, err := q.db.Query(ctx, listAuditLogs,
+		arg.ActorUserID,
+		arg.Action,
+		arg.ResourceType,
+		arg.ResourceID,
+		arg.DateFrom,
+		arg.DateTo,
+		arg.PageOffset,
+		arg.PageLimit,
+	)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	items := []ListAuditLogsRow{}
+	for rows.Next() {
+		var i ListAuditLogsRow
+		if err := rows.Scan(
+			&i.ID,
+			&i.ActorUserID,
+			&i.Action,
+			&i.ResourceType,
+			&i.ResourceID,
+			&i.Metadata,
+			&i.CreatedAt,
+			&i.ActorEmail,
+			&i.ActorFirstName,
+			&i.ActorLastName,
+		); err != nil {
+			return nil, err
+		}
+		items = append(items, i)
+	}
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+	return items, nil
+}
+
+const listDistinctAuditActions = `-- name: ListDistinctAuditActions :many
+SELECT DISTINCT action FROM audit_logs ORDER BY action
+`
+
+// Backs a frontend filter dropdown with the action codes that actually
+// appear in the log, rather than hardcoding the full set client-side —
+// that set has grown with every milestone since M6 and will keep growing.
+func (q *Queries) ListDistinctAuditActions(ctx context.Context) ([]string, error) {
+	rows, err := q.db.Query(ctx, listDistinctAuditActions)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	items := []string{}
+	for rows.Next() {
+		var action string
+		if err := rows.Scan(&action); err != nil {
+			return nil, err
+		}
+		items = append(items, action)
+	}
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+	return items, nil
 }

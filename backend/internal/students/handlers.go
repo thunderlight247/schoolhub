@@ -32,6 +32,7 @@ type ServiceAPI interface {
 	GetGuardian(ctx context.Context, id uuid.UUID) (GuardianDetail, error)
 	ListGuardians(ctx context.Context, f GuardianListFilter) ([]db.ListGuardiansRow, int64, error)
 	UpdateGuardian(ctx context.Context, actorID, id uuid.UUID, in UpdateGuardianInput) (GuardianDetail, error)
+	CreateGuardianAccount(ctx context.Context, actorID, guardianID uuid.UUID, in GuardianAccountInput) error
 }
 
 // Handler exposes the students/guardians endpoints (sections 14-15/25).
@@ -210,8 +211,18 @@ type guardianDTO struct {
 	Address     *string          `json:"address,omitempty"`
 	Occupation  *string          `json:"occupation,omitempty"`
 	Students    []studentLinkDTO `json:"students"`
-	CreatedAt   string           `json:"created_at"`
-	UpdatedAt   string           `json:"updated_at"`
+	// Optional login account (nil until an admin creates parent access).
+	Account   *accountDTO `json:"account,omitempty"`
+	CreatedAt string      `json:"created_at"`
+	UpdatedAt string      `json:"updated_at"`
+}
+
+// accountDTO is the parent-access summary shown on the guardian profile.
+type accountDTO struct {
+	ID     string   `json:"id"`
+	Email  string   `json:"email"`
+	Status string   `json:"status"`
+	Roles  []string `json:"roles"`
 }
 
 func toGuardianDTO(d GuardianDetail) guardianDTO {
@@ -219,6 +230,15 @@ func toGuardianDTO(d GuardianDetail) guardianDTO {
 	students := make([]studentLinkDTO, 0, len(d.Students))
 	for _, st := range d.Students {
 		students = append(students, toStudentLinkDTO(st))
+	}
+	var account *accountDTO
+	if r.AccountID.Valid {
+		account = &accountDTO{
+			ID:     uuid.UUID(r.AccountID.Bytes).String(),
+			Email:  r.AccountEmail.String,
+			Status: r.AccountStatus.String,
+			Roles:  d.AccountRoles,
+		}
 	}
 	return guardianDTO{
 		ID:          r.ID.String(),
@@ -232,6 +252,7 @@ func toGuardianDTO(d GuardianDetail) guardianDTO {
 		Address:     textPtr(r.Address),
 		Occupation:  textPtr(r.Occupation),
 		Students:    students,
+		Account:     account,
 		CreatedAt:   tsString(r.CreatedAt),
 		UpdatedAt:   tsString(r.UpdatedAt),
 	}
@@ -300,6 +321,59 @@ func requireActor(c *gin.Context) (uuid.UUID, bool) {
 		apierror.Respond(c, http.StatusUnauthorized, "UNAUTHENTICATED", "Authentication required.", nil)
 	}
 	return id, ok
+}
+
+// CreateGuardianAccount handles POST /api/v1/guardians/:id/account — the
+// "Create parent access" action on a guardian's profile. Provisions the
+// PARENT login (Argon2id-hashed password, audit entry) and fires the
+// best-effort welcome email + Clerk invitation after commit.
+func (h *Handler) CreateGuardianAccount(c *gin.Context) {
+	actor, ok := requireActor(c)
+	if !ok {
+		return
+	}
+	id, ok := parseUUIDParam(c, c.Param("id"), "guardian id")
+	if !ok {
+		return
+	}
+
+	var req struct {
+		Email    string `json:"email" binding:"required,email"`
+		Password string `json:"password" binding:"required,min=8"`
+		Role     string `json:"role"`
+	}
+	if err := c.ShouldBindJSON(&req); err != nil {
+		apierror.Respond(c, http.StatusBadRequest, "VALIDATION_ERROR", "email (valid address) and password (min 8 chars) are required.", nil)
+		return
+	}
+
+	in := GuardianAccountInput{Email: req.Email, Password: req.Password, RoleName: "PARENT"}
+	if req.Role != "" && req.Role != "PARENT" {
+		apierror.Respond(c, http.StatusBadRequest, "VALIDATION_ERROR", "Parent access is always granted with the PARENT role.", nil)
+		return
+	}
+
+	if err := h.service.CreateGuardianAccount(c.Request.Context(), actor, id, in); err != nil {
+		switch {
+		case errors.Is(err, ErrGuardianNotFound):
+			apierror.Respond(c, http.StatusNotFound, "NOT_FOUND", "Guardian not found.", nil)
+		case errors.Is(err, ErrAccountExists):
+			apierror.Respond(c, http.StatusConflict, "ACCOUNT_EXISTS", "This guardian already has a user account.", nil)
+		case errors.Is(err, ErrEmailTaken):
+			apierror.Respond(c, http.StatusConflict, "EMAIL_TAKEN", "That email is already in use by an account.", nil)
+		case errors.Is(err, ErrUnknownRole):
+			apierror.Respond(c, http.StatusBadRequest, "VALIDATION_ERROR", "Unknown role.", nil)
+		default:
+			apierror.Respond(c, http.StatusInternalServerError, "INTERNAL_ERROR", "Could not create the parent account.", nil)
+		}
+		return
+	}
+
+	c.JSON(http.StatusCreated, gin.H{"account": gin.H{
+		"email":  req.Email,
+		"status": "ACTIVE",
+		"roles":  []string{"PARENT"},
+	}})
 }
 
 // parseDateParam converts a client-supplied YYYY-MM-DD string, writing the

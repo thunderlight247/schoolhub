@@ -19,6 +19,7 @@ import (
 
 	db "github.com/thunderlight247/schoolhub/backend/db/generated"
 	"github.com/thunderlight247/schoolhub/backend/internal/audit"
+	"github.com/thunderlight247/schoolhub/backend/internal/email"
 )
 
 // Target types.
@@ -97,10 +98,20 @@ type UpdateAnnouncementInput struct {
 
 type Service struct {
 	pool *pgxpool.Pool
+	// mailer is optional (nil by default): when an email provider is
+	// configured, publishing a school-wide announcement notifies staff by
+	// email on a best-effort basis after commit.
+	mailer *email.Service
 }
 
 func NewService(pool *pgxpool.Pool) *Service {
 	return &Service{pool: pool}
+}
+
+// SetMailer attaches an optional email service used for publish
+// notifications. Safe to call once during wiring.
+func (s *Service) SetMailer(mailer *email.Service) {
+	s.mailer = mailer
 }
 
 func (s *Service) CreateAnnouncement(ctx context.Context, authorID uuid.UUID, in CreateAnnouncementInput) (db.GetAnnouncementByIDRow, error) {
@@ -527,6 +538,40 @@ func (s *Service) PublishAnnouncement(ctx context.Context, actorID uuid.UUID, is
 
 	if err := tx.Commit(ctx); err != nil {
 		return db.GetAnnouncementByIDRow{}, fmt.Errorf("announcements: commit: %w", err)
+	}
+
+	// Best-effort email notification for school-wide announcements (after
+	// commit; never blocks or fails the publish itself). No-op when no
+	// provider is configured or the announcement is role/class-targeted.
+	if s.mailer != nil && s.mailer.Enabled() && published.TargetType == TargetAll {
+		title := published.Title
+		body := ""
+		if published.Content != "" {
+			body = published.Content
+			if len(body) > 400 {
+				body = body[:400]
+			}
+		}
+		go func() {
+			mailCtx, cancel := context.WithTimeout(context.Background(), 20*time.Second)
+			defer cancel()
+			recipients, err := s.pool.Query(mailCtx,
+				`SELECT DISTINCT u.email FROM users u
+				 JOIN user_roles ur ON ur.user_id = u.id
+				 JOIN roles r ON r.id = ur.role_id
+				 WHERE u.status = 'ACTIVE' AND r.name IN ('ADMIN','TEACHER','STAFF')`)
+			if err != nil {
+				return
+			}
+			defer recipients.Close()
+			for recipients.Next() {
+				var to string
+				if err := recipients.Scan(&to); err != nil {
+					continue
+				}
+				_ = s.mailer.SendAnnouncement(mailCtx, to, title, body)
+			}
+		}()
 	}
 
 	return s.GetAnnouncement(ctx, published.ID)

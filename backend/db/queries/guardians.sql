@@ -4,6 +4,9 @@ VALUES (sqlc.arg(person_id), sqlc.narg(occupation))
 RETURNING *;
 
 -- name: GetGuardianByID :one
+-- Also LEFT JOINs the guardian's optional login account (users is 1:1 with
+-- people) so the profile page can show whether parent access exists and
+-- what state it's in without a second round-trip.
 SELECT
     g.id,
     g.person_id,
@@ -17,9 +20,13 @@ SELECT
     p.gender,
     p.phone,
     p.email,
-    p.address
+    p.address,
+    u.id          AS account_id,
+    u.email       AS account_email,
+    u.status      AS account_status
 FROM guardians g
 JOIN people p ON p.id = g.person_id
+LEFT JOIN users u ON u.person_id = p.id
 WHERE g.id = sqlc.arg(id);
 
 -- name: ListGuardians :many

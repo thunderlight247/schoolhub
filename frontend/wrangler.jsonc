@@ -1,0 +1,25 @@
+// Cloudflare Workers config for the SchoolHub frontend (Next.js via the
+// OpenNext Cloudflare adapter). This is Cloudflare's current supported way
+// to host a Next.js app — classic "Pages + next-on-pages" predates Next 16.
+// Deployment URL ends in *.workers.dev (or a custom domain added in the
+// Cloudflare dashboard).
+//
+// Build commands (see package.json scripts):
+//   npm run build:cf   — builds Next.js through opennextjs-cloudflare
+//   npm run preview:cf — serves the built app locally via workerd
+//   npm run deploy:cf  — deploys to Cloudflare
+//
+// NEXT_PUBLIC_API_URL must be set at BUILD time (it is inlined into the
+// client bundle), e.g.:
+//   NEXT_PUBLIC_API_URL=https://schoolhub-api.onrender.com/api/v1 npm run build:cf
+{
+  "$schema": "node_modules/wrangler/config-schema.json",
+  "name": "schoolhub-frontend",
+  "main": ".open-next/worker.js",
+  "compatibility_date": "2026-10-01",
+  "compatibility_flags": ["nodejs_compat"],
+  "assets": {
+    "directory": ".open-next/assets",
+    "binding": "ASSETS"
+  }
+}

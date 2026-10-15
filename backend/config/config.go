@@ -5,6 +5,7 @@ package config
 
 import (
 	"fmt"
+	"net/http"
 	"os"
 )
 
@@ -34,6 +35,30 @@ type Config struct {
 	// where frontend and backend share a registrable domain. A
 	// split-domain deployment needs this revisited — see M4's report.
 	CookieDomain string
+
+	// CookieSameSite is the raw SameSite attribute for the session
+	// cookie: "lax" (default, correct when frontend/API share a site),
+	// "none" (required for a split-domain deployment — see
+	// CookieConfig's comment in internal/auth for why), or "strict".
+	// Empty means lax. "none" additionally requires Secure=true (i.e.
+	// APP_ENV=production): browsers reject SameSite=None without Secure.
+	CookieSameSite string
+
+	// ClerkSecretKey enables the Clerk authentication bridge (POST
+	// /api/v1/auth/clerk-session) when set. When empty (the default) the
+	// classic email/password session flow is the only auth path and the
+	// bridge endpoint is not mounted. Never exposed to the client.
+	ClerkSecretKey string
+
+	// ResendAPIKey enables outbound email (account welcome messages and
+	// school-wide announcement notifications) via Resend. Empty disables
+	// sending entirely — the app is fully functional without it.
+	ResendAPIKey string
+
+	// EmailFromAddress is the verified Resend sender address, e.g.
+	// "SchoolHub Academy <no-reply@schoolhub.example>". Ignored when no
+	// API key is set.
+	EmailFromAddress string
 }
 
 // Load reads configuration from environment variables and returns a Config.
@@ -41,18 +66,46 @@ type Config struct {
 // fast at startup rather than behaving unpredictably later.
 func Load() (*Config, error) {
 	cfg := &Config{
-		Port:         getEnv("PORT", "8080"),
-		DatabaseURL:  os.Getenv("DATABASE_URL"),
-		Environment:  getEnv("APP_ENV", "development"),
-		FrontendURL:  getEnv("FRONTEND_URL", "http://localhost:3000"),
-		CookieDomain: getEnv("COOKIE_DOMAIN", ""),
+		Port:             getEnv("PORT", "8080"),
+		DatabaseURL:      os.Getenv("DATABASE_URL"),
+		Environment:      getEnv("APP_ENV", "development"),
+		FrontendURL:      getEnv("FRONTEND_URL", "http://localhost:3000"),
+		CookieDomain:     getEnv("COOKIE_DOMAIN", ""),
+		CookieSameSite:   getEnv("COOKIE_SAMESITE", "lax"),
+		ClerkSecretKey:   os.Getenv("CLERK_SECRET_KEY"),
+		ResendAPIKey:     os.Getenv("RESEND_API_KEY"),
+		EmailFromAddress: getEnv("EMAIL_FROM_ADDRESS", "SchoolHub Academy <onboarding@resend.dev>"),
 	}
 
 	if cfg.DatabaseURL == "" {
 		return nil, fmt.Errorf("config: DATABASE_URL is required but was not set")
 	}
 
+	switch cfg.CookieSameSite {
+	case "", "lax", "strict", "none":
+	default:
+		return nil, fmt.Errorf("config: invalid COOKIE_SAMESITE %q (want lax, strict, or none)", cfg.CookieSameSite)
+	}
+	if cfg.CookieSameSite == "none" && !cfg.IsProduction() {
+		return nil, fmt.Errorf("config: COOKIE_SAMESITE=none requires APP_ENV=production (browsers reject SameSite=None without the Secure attribute)")
+	}
+
 	return cfg, nil
+}
+
+// CookieSameSiteMode maps the COOKIE_SAMESITE env value to the
+// http.SameSite constants the auth handlers need. "lax" is the default
+// (matching what the handlers previously hardcoded); Load validates the
+// raw string and the none-needs-production rule before callers run.
+func (c *Config) CookieSameSiteMode() http.SameSite {
+	switch c.CookieSameSite {
+	case "strict":
+		return http.SameSiteStrictMode
+	case "none":
+		return http.SameSiteNoneMode
+	default:
+		return http.SameSiteLaxMode
+	}
 }
 
 // IsProduction reports whether the server is running in production mode.

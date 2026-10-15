@@ -26,6 +26,8 @@ import (
 
 	db "github.com/thunderlight247/schoolhub/backend/db/generated"
 	"github.com/thunderlight247/schoolhub/backend/internal/audit"
+	"github.com/thunderlight247/schoolhub/backend/internal/auth"
+	"github.com/thunderlight247/schoolhub/backend/internal/email"
 )
 
 // PostgreSQL error codes this service maps to friendlier errors. Duplicated
@@ -61,11 +63,40 @@ var (
 type Service struct {
 	pool    *pgxpool.Pool
 	queries *db.Queries
+
+	// Optional outbound email + Clerk invitations, set once during wiring
+	// (SetMailer/SetInviter); both flows are best-effort after commit.
+	mailer      email.Sender
+	inviter     *auth.ClerkInviter
+	frontendURL string
 }
 
 func NewService(pool *pgxpool.Pool) *Service {
 	return &Service{pool: pool, queries: db.New(pool)}
 }
+
+// SetMailer and SetInviter attach the optional outbound-email provider and
+// the optional Clerk invitation issuer (both no-ops before wiring). They
+// are safe to call once during composition in cmd/server/main.go.
+func (s *Service) SetMailer(mailer email.Sender, frontendURL string) {
+	s.mailer = mailer
+	if frontendURL != "" {
+		s.frontendURL = frontendURL
+	}
+}
+
+func (s *Service) SetInviter(inviter *auth.ClerkInviter) {
+	s.inviter = inviter
+}
+
+// ErrEmailTaken / ErrAccountExists mirror internal/staff's account errors;
+// the students package now provisions PARENT accounts too, and handlers
+// map these to the same structured responses the staff endpoints return.
+var (
+	ErrEmailTaken    = errors.New("students: email already in use by an account")
+	ErrAccountExists = errors.New("students: guardian already has a user account")
+	ErrUnknownRole   = errors.New("students: unknown role name")
+)
 
 // StudentDetail is the full student profile: the joined person+student row
 // plus their linked guardians.
@@ -75,10 +106,12 @@ type StudentDetail struct {
 }
 
 // GuardianDetail is the full guardian profile: the joined person+guardian
-// row plus the students they're linked to.
+// row plus the students they're linked to (and, when present, the roles
+// of the guardian's login account, resolved fresh from user_roles).
 type GuardianDetail struct {
-	Row      db.GetGuardianByIDRow
-	Students []db.ListStudentsForGuardianRow
+	Row          db.GetGuardianByIDRow
+	Students     []db.ListStudentsForGuardianRow
+	AccountRoles []string
 }
 
 // CreateStudentInput registers a brand-new person as a student. Unlike
@@ -550,7 +583,20 @@ func (s *Service) GetGuardian(ctx context.Context, id uuid.UUID) (GuardianDetail
 		return GuardianDetail{}, err
 	}
 
-	return GuardianDetail{Row: row, Students: studentsForGuardian}, nil
+	// Roles for the account summary (empty when no login account exists).
+	var accountRoles []string
+	if row.AccountID.Valid {
+		roleRows, err := s.queries.ListRolesForUser(ctx, uuid.UUID(row.AccountID.Bytes))
+		if err != nil {
+			return GuardianDetail{}, err
+		}
+		accountRoles = make([]string, 0, len(roleRows))
+		for _, r := range roleRows {
+			accountRoles = append(accountRoles, r.Name)
+		}
+	}
+
+	return GuardianDetail{Row: row, Students: studentsForGuardian, AccountRoles: accountRoles}, nil
 }
 
 // ListGuardians returns one page of the filtered guardian list plus the
@@ -775,4 +821,147 @@ func (s *Service) UnlinkGuardianFromStudent(ctx context.Context, actorID, studen
 	}
 
 	return s.queries.ListGuardiansForStudent(ctx, studentID)
+}
+
+// --- guardian login accounts (expert-pass access-control follow-up) ---
+//
+// The parent-side mirror of internal/staff's CreateAccount: an admin
+// provisions a PARENT login for a guardian record, the guardian receives
+// a welcome email plus (when Clerk is configured) an official invitation
+// to create their identity with that same email, and the existing bridge
+// lets them into the parent portal on first sign-in.
+
+// GuardianAccountInput mirrors staff.CreateAccountInput. Password policy
+// is the handler's concern (binding tags); the service treats it as
+// opaque. RoleName must be PARENT (this endpoint must not be able to
+// mint admins or teachers — role changes for other audiences go through
+// /staff/:id/account and RBAC).
+type GuardianAccountInput struct {
+	Email    string
+	Password string
+	RoleName string // always PARENT today; kept explicit
+}
+
+// CreateGuardianAccount creates the guardian's user account (Argon2id
+// hash, PARENT role, audit entry) in one transaction, then fires the
+// best-effort welcome email + Clerk invitation after commit.
+func (s *Service) CreateGuardianAccount(ctx context.Context, actorID, guardianID uuid.UUID, in GuardianAccountInput) error {
+	tx, err := s.pool.Begin(ctx)
+	if err != nil {
+		return err
+	}
+	defer tx.Rollback(ctx)
+
+	q := s.queries.WithTx(tx)
+
+	guardian, err := q.GetGuardianByID(ctx, guardianID)
+	if err != nil {
+		if errors.Is(err, pgx.ErrNoRows) {
+			return ErrGuardianNotFound
+		}
+		return err
+	}
+
+	if _, err := q.GetUserByPersonID(ctx, guardian.PersonID); err == nil {
+		return ErrAccountExists
+	} else if !errors.Is(err, pgx.ErrNoRows) {
+		return err
+	}
+
+	if _, err := q.GetUserByEmail(ctx, in.Email); err == nil {
+		return ErrEmailTaken
+	} else if !errors.Is(err, pgx.ErrNoRows) {
+		return err
+	}
+
+	hash, err := auth.HashPassword(in.Password)
+	if err != nil {
+		return err
+	}
+
+	roleName := in.RoleName
+	if roleName == "" {
+		roleName = "PARENT"
+	}
+	if roleName != "PARENT" {
+		return ErrUnknownRole
+	}
+	role, err := q.GetRoleByName(ctx, roleName)
+	if err != nil {
+		if errors.Is(err, pgx.ErrNoRows) {
+			return ErrUnknownRole
+		}
+		return err
+	}
+
+	user, err := q.CreateUser(ctx, db.CreateUserParams{
+		PersonID:     guardian.PersonID,
+		Email:        in.Email,
+		PasswordHash: hash,
+	})
+	if err != nil {
+		var pgErr *pgconn.PgError
+		if errors.As(err, &pgErr) && pgErr.Code == pgErrUniqueViolation {
+			// Raced with another admin creating the same email.
+			return ErrEmailTaken
+		}
+		return err
+	}
+	// M34: record who provisioned this parent account (inviter tracking).
+	if err := q.SetUserInvitedBy(ctx, db.SetUserInvitedByParams{
+		ID:        user.ID,
+		InvitedBy: pgtype.UUID{Bytes: actorID, Valid: true},
+	}); err != nil {
+		return err
+	}
+
+	if err := q.AssignRoleToUser(ctx, db.AssignRoleToUserParams{UserID: user.ID, RoleID: role.ID}); err != nil {
+		return err
+	}
+
+	if err := audit.Record(ctx, q, audit.Entry{
+		ActorUserID:  actorID,
+		Action:       audit.ActionUserCreated,
+		ResourceType: audit.ResourceUser,
+		ResourceID:   user.ID,
+		Metadata:     map[string]any{"email": in.Email, "roles": []string{roleName}, "guardian_id": guardianID.String()},
+	}); err != nil {
+		return err
+	}
+
+	if err := tx.Commit(ctx); err != nil {
+		return err
+	}
+
+	// The person row may not carry the email; the account email is the
+	// authoritative address for the invitation.
+	accountEmail := in.Email
+	name := guardian.FirstName + " " + guardian.LastName
+
+	// Best-effort Clerk invitation — the recipient gets the official
+	// "create your password" email and lands on /register; the bridge
+	// matches them by this same email on first sign-in.
+	if s.inviter != nil && s.inviter.Enabled() {
+		go func(addr string) {
+			ictx, cancel := context.WithTimeout(context.Background(), 15*time.Second)
+			defer cancel()
+			s.inviter.Create(ictx, addr)
+		}(accountEmail)
+	}
+
+	// Best-effort welcome email (same posture as the staff flow).
+	if svc, ok := s.mailer.(*email.Service); ok && svc != nil && svc.Enabled() {
+		to := accountEmail
+		go func() {
+			ectx, cancel := context.WithTimeout(context.Background(), 15*time.Second)
+			defer cancel()
+			signIn := s.frontendURL
+			if signIn == "" {
+				signIn = "http://localhost:3000/login"
+			}
+			_ = svc.SendWelcome(ectx, to, name, signIn)
+		}()
+	}
+
+	return nil
 }

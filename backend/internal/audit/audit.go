@@ -78,12 +78,23 @@ const (
 	ActionAnnouncementPublished = "ANNOUNCEMENT_PUBLISHED"
 	ActionAnnouncementArchived  = "ANNOUNCEMENT_ARCHIVED"
 	ActionAnnouncementDeleted   = "ANNOUNCEMENT_DELETED"
+
+	// Admin/account access control (expert pass follow-up): master-admin
+	// role management plus the block/unblock of parent/teacher accounts.
+	ActionAdminAccessRevoked   = "ADMIN_ACCESS_REVOKED"
+	ActionAccountStatusChanged = "ACCOUNT_STATUS_CHANGED"
+
+	// M34 — forced first-login password change (self-service; also used
+	// when the password is rotated through Clerk in Clerk mode).
+	ActionPasswordChanged = "PASSWORD_CHANGED"
 )
 
 // Resource types referenced by audit entries.
 const (
 	ResourceStaff         = "staff"
 	ResourceUser          = "user"
+
+	// M34.
 	ResourceDepartment    = "department"
 	ResourceStaffPosition = "staff_position"
 

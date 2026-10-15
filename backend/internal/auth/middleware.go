@@ -32,6 +32,17 @@ func RequireAuth(service *Service, cookieName string) gin.HandlerFunc {
 			return
 		}
 
+		// M34 forced password change: a bootstrap account (e.g. the master
+		// admin, provisioned with a developer-known temporary password) may
+		// only reach change-password / logout / me until the flag clears.
+		if authUser.User.MustChangePassword && !passwordChangeAllowed(c.Request.Method, c.FullPath()) {
+			apierror.Respond(c, http.StatusForbidden, "PASSWORD_CHANGE_REQUIRED",
+				"Password change required before using the system.",
+				map[string]any{"must_change_password": true})
+			c.Abort()
+			return
+		}
+
 		c.Set(contextKeyUser, authUser)
 		c.Next()
 	}

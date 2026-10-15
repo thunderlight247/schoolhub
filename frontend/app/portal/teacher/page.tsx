@@ -1,7 +1,8 @@
 "use client";
 
 import { useEffect, useState } from "react";
-import Link from "next/link";
+import { AppShell } from "@/components/app-shell";
+import { ProtectedRoute } from "@/components/protected-route";
 import {
   AssignedClass,
   StudentRosterItem,
@@ -65,43 +66,32 @@ export default function TeacherPortalPage() {
     loadRoster();
   }, [selectedClass]);
 
+  const contextChips = (
+    <>
+      {data?.academic_context?.academic_year_name && (
+        <span className="rounded-full bg-brand-50 px-3 py-1 text-xs font-semibold text-brand-700 border border-brand-100">
+          AY {data.academic_context.academic_year_name}
+        </span>
+      )}
+      {data?.academic_context?.term_name && (
+        <span className="rounded-full bg-slate-100 px-3 py-1 text-xs font-medium text-slate-700 border border-slate-200">
+          {data.academic_context.term_name}
+        </span>
+      )}
+      <button
+        onClick={loadData}
+        disabled={loading}
+        className="rounded-md border border-slate-200 bg-white px-3 py-1.5 text-xs font-medium text-slate-700 shadow-sm hover:bg-slate-50 disabled:opacity-50"
+      >
+        Refresh
+      </button>
+    </>
+  );
+
   return (
-    <div className="min-h-screen bg-slate-50 text-slate-900 pb-16">
-      {/* Top Header */}
-      <header className="border-b border-slate-200 bg-white sticky top-0 z-10 shadow-sm">
-        <div className="mx-auto flex max-w-7xl items-center justify-between px-4 py-4 sm:px-6 lg:px-8">
-          <div className="flex items-center gap-3">
-            <Link href="/" className="text-xl font-bold text-brand-900 hover:text-brand-700">
-              SchoolHub
-            </Link>
-            <span className="text-slate-300">/</span>
-            <span className="text-sm font-medium text-slate-600">Teacher Portal</span>
-          </div>
-
-          <div className="flex items-center gap-3">
-            {data?.academic_context?.academic_year_name && (
-              <span className="rounded-full bg-brand-50 px-3 py-1 text-xs font-semibold text-brand-700 border border-brand-100">
-                AY {data.academic_context.academic_year_name}
-              </span>
-            )}
-            {data?.academic_context?.term_name && (
-              <span className="rounded-full bg-slate-100 px-3 py-1 text-xs font-medium text-slate-700 border border-slate-200">
-                {data.academic_context.term_name}
-              </span>
-            )}
-            <button
-              onClick={loadData}
-              disabled={loading}
-              className="rounded-md border border-slate-200 bg-white px-3 py-1.5 text-xs font-medium text-slate-700 shadow-sm hover:bg-slate-50 disabled:opacity-50"
-            >
-              Refresh
-            </button>
-          </div>
-        </div>
-      </header>
-
-      {/* Main Content */}
-      <main className="mx-auto max-w-7xl px-4 py-8 sm:px-6 lg:px-8 space-y-8">
+    <ProtectedRoute requiredRole="TEACHER">
+      <AppShell title="Teacher Portal" actions={contextChips}>
+        <div className="space-y-8">
         {/* Teacher Welcome & Profile Banner */}
         <div className="rounded-xl border border-slate-200 bg-white p-6 shadow-sm flex flex-col md:flex-row md:items-center justify-between gap-4">
           <div>
@@ -290,8 +280,12 @@ export default function TeacherPortalPage() {
                     </tr>
                   </thead>
                   <tbody className="divide-y divide-slate-100">
-                    {roster.map((s) => (
-                      <tr key={s.student_id} className="hover:bg-slate-50/60">
+                    {/* The roster query LEFT JOINs student_guardians, so a student
+                        with two linked guardians produces one row per guardian —
+                        key on the row index, not on student_id, to avoid React
+                        duplicate-key warnings. */}
+                    {roster.map((s, idx) => (
+                      <tr key={`${s.student_id}-${idx}`} className="hover:bg-slate-50/60">
                         <td className="py-3 px-3 font-semibold text-slate-900">
                           {s.first_name} {s.last_name}
                         </td>
@@ -460,7 +454,8 @@ export default function TeacherPortalPage() {
             </div>
           )}
         </div>
-      </main>
-    </div>
+        </div>
+      </AppShell>
+    </ProtectedRoute>
   );
 }

@@ -10,8 +10,8 @@
 //
 // Usage (from backend/, with DATABASE_URL set):
 //
-//	go run ./cmd/seed -email admin@schoolhub.test -password "ChangeMe123!"
-//	go run ./cmd/seed -role TEACHER -email teacher@schoolhub.test -password "ChangeMe123!"
+//	go run ./cmd/seed -email alice@example.com -password '…'
+//	go run ./cmd/seed -role TEACHER -email bob@example.com -password '…'
 package main
 
 import (
@@ -30,12 +30,15 @@ import (
 )
 
 func main() {
-	email := flag.String("email", "admin@schoolhub.test", "login email for the seeded user")
-	password := flag.String("password", "ChangeMe123!", "login password for the seeded user (DEV ONLY — never use a fixed password like this in production)")
-	firstName := flag.String("first-name", "Demo", "first name")
+	email := flag.String("email", "", "login email for the seeded user (required)")
+	password := flag.String("password", "", "login password for the seeded user (required — pick a strong one; there is no fixed default)")
+	firstName := flag.String("first-name", "QA", "first name")
 	lastName := flag.String("last-name", "Admin", "last name")
 	role := flag.String("role", "ADMIN", "role to assign: ADMIN, TEACHER, STAFF, PARENT, or STUDENT")
 	flag.Parse()
+	if *email == "" || *password == "" {
+		log.Fatal("seed: -email and -password are required")
+	}
 
 	_ = godotenv.Load()
 
@@ -87,6 +90,33 @@ func main() {
 		RoleID: roleRow.ID,
 	}); err != nil {
 		log.Fatalf("assigning %s role: %v", *role, err)
+	}
+
+	// Bootstrap invariant (mirrors migration 000014's promotion of every
+	// pre-existing ADMIN): if you are seeding this account's first admin,
+	// it must also be able to MANAGE admins — on a fresh database the
+	// migration has already run, so the only remaining way to get a
+	// MASTER_ADMIN would otherwise be none at all. Idempotent: skipped
+	// when the role is already present.
+	if *role == "ADMIN" {
+		masterRole, err := queries.GetRoleByName(ctx, "MASTER_ADMIN")
+		if err != nil {
+			log.Fatalf("looking up MASTER_ADMIN role (did you run migrations?): %v", err)
+		}
+		var hasMaster bool
+		if err := pool.QueryRow(ctx,
+			`SELECT EXISTS (SELECT 1 FROM user_roles WHERE user_id = $1 AND role_id = $2)`,
+			user.ID, masterRole.ID).Scan(&hasMaster); err != nil {
+			log.Fatalf("checking existing MASTER_ADMIN role: %v", err)
+		}
+		if !hasMaster {
+			if _, err := pool.Exec(ctx,
+				`INSERT INTO user_roles (user_id, role_id) VALUES ($1, $2)`,
+				user.ID, masterRole.ID); err != nil {
+				log.Fatalf("assigning MASTER_ADMIN role: %v", err)
+			}
+			fmt.Println("  roles:    ADMIN + MASTER_ADMIN (bootstrap)")
+		}
 	}
 
 	fmt.Printf("Seeded %s user:\n", *role)

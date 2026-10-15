@@ -1,10 +1,12 @@
 import type { Metadata } from "next";
 import "./globals.css";
+import { AuthProvider } from "@/components/auth-provider";
+import { ClerkBridge } from "@/components/clerk-bridge";
 
 export const metadata: Metadata = {
-  title: "SchoolHub",
+  title: "SchoolHub Academy",
   description:
-    "A portfolio prototype for a school administration and management portal.",
+    "SchoolHub Academy — an independent day school where bright futures begin. Admissions, academics, news, and the parent/student/staff portal.",
 };
 
 export default function RootLayout({
@@ -15,7 +17,9 @@ export default function RootLayout({
   return (
     <html lang="en">
       <body className="min-h-screen bg-white text-slate-900 antialiased">
-        {children}
+        <AuthProvider>
+          <ClerkBridge>{children}</ClerkBridge>
+        </AuthProvider>
       </body>
     </html>
   );

@@ -9,7 +9,30 @@ import (
 	"context"
 
 	"github.com/google/uuid"
+	"github.com/jackc/pgx/v5/pgtype"
 )
+
+const countActiveMasterAdminsExcept = `-- name: CountActiveMasterAdminsExcept :one
+SELECT count(*)::bigint
+FROM users u
+WHERE u.id <> $1
+  AND u.status = 'ACTIVE'
+  AND EXISTS (
+      SELECT 1 FROM user_roles ur
+      JOIN roles r ON r.id = ur.role_id
+      WHERE ur.user_id = u.id AND r.name = 'MASTER_ADMIN'
+  )
+`
+
+// Last-master guard for the blocking rules (M34): how many OTHER users are
+// ACTIVE masters — zero means the candidate is the only one and must not
+// be suspended.
+func (q *Queries) CountActiveMasterAdminsExcept(ctx context.Context, excludeUserID uuid.UUID) (int64, error) {
+	row := q.db.QueryRow(ctx, countActiveMasterAdminsExcept, excludeUserID)
+	var column_1 int64
+	err := row.Scan(&column_1)
+	return column_1, err
+}
 
 const createUser = `-- name: CreateUser :one
 INSERT INTO users (
@@ -17,7 +40,7 @@ INSERT INTO users (
 ) VALUES (
     $1, $2, $3
 )
-RETURNING id, person_id, email, password_hash, status, last_login_at, created_at, updated_at
+RETURNING id, person_id, email, password_hash, status, last_login_at, created_at, updated_at, must_change_password, invited_by
 `
 
 type CreateUserParams struct {
@@ -38,12 +61,14 @@ func (q *Queries) CreateUser(ctx context.Context, arg CreateUserParams) (User, e
 		&i.LastLoginAt,
 		&i.CreatedAt,
 		&i.UpdatedAt,
+		&i.MustChangePassword,
+		&i.InvitedBy,
 	)
 	return i, err
 }
 
 const getUserByEmail = `-- name: GetUserByEmail :one
-SELECT id, person_id, email, password_hash, status, last_login_at, created_at, updated_at FROM users
+SELECT id, person_id, email, password_hash, status, last_login_at, created_at, updated_at, must_change_password, invited_by FROM users
 WHERE email = $1
 `
 
@@ -63,12 +88,14 @@ func (q *Queries) GetUserByEmail(ctx context.Context, email string) (User, error
 		&i.LastLoginAt,
 		&i.CreatedAt,
 		&i.UpdatedAt,
+		&i.MustChangePassword,
+		&i.InvitedBy,
 	)
 	return i, err
 }
 
 const getUserByID = `-- name: GetUserByID :one
-SELECT id, person_id, email, password_hash, status, last_login_at, created_at, updated_at FROM users
+SELECT id, person_id, email, password_hash, status, last_login_at, created_at, updated_at, must_change_password, invited_by FROM users
 WHERE id = $1
 `
 
@@ -84,12 +111,14 @@ func (q *Queries) GetUserByID(ctx context.Context, id uuid.UUID) (User, error) {
 		&i.LastLoginAt,
 		&i.CreatedAt,
 		&i.UpdatedAt,
+		&i.MustChangePassword,
+		&i.InvitedBy,
 	)
 	return i, err
 }
 
 const getUserByPersonID = `-- name: GetUserByPersonID :one
-SELECT id, person_id, email, password_hash, status, last_login_at, created_at, updated_at FROM users
+SELECT id, person_id, email, password_hash, status, last_login_at, created_at, updated_at, must_change_password, invited_by FROM users
 WHERE person_id = $1
 `
 
@@ -105,8 +134,71 @@ func (q *Queries) GetUserByPersonID(ctx context.Context, personID uuid.UUID) (Us
 		&i.LastLoginAt,
 		&i.CreatedAt,
 		&i.UpdatedAt,
+		&i.MustChangePassword,
+		&i.InvitedBy,
 	)
 	return i, err
+}
+
+const listUsersInvitedBy = `-- name: ListUsersInvitedBy :many
+SELECT
+    u.id,
+    u.email,
+    u.status,
+    u.created_at,
+    p.first_name,
+    p.last_name,
+    COALESCE(
+        (SELECT string_agg(r.name, ',' ORDER BY r.name)
+         FROM user_roles ur
+         JOIN roles r ON r.id = ur.role_id
+         WHERE ur.user_id = u.id),
+        ''
+    ) AS roles
+FROM users u
+JOIN people p ON p.id = u.person_id
+WHERE u.invited_by = $1
+ORDER BY u.created_at DESC
+`
+
+type ListUsersInvitedByRow struct {
+	ID        uuid.UUID          `json:"id"`
+	Email     string             `json:"email"`
+	Status    string             `json:"status"`
+	CreatedAt pgtype.Timestamptz `json:"created_at"`
+	FirstName string             `json:"first_name"`
+	LastName  string             `json:"last_name"`
+	Roles     interface{}        `json:"roles"`
+}
+
+// GET /my-invitees: the accounts the caller personally provisioned,
+// together with their current role + status for the /access section.
+func (q *Queries) ListUsersInvitedBy(ctx context.Context, invitedBy pgtype.UUID) ([]ListUsersInvitedByRow, error) {
+	rows, err := q.db.Query(ctx, listUsersInvitedBy, invitedBy)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	items := []ListUsersInvitedByRow{}
+	for rows.Next() {
+		var i ListUsersInvitedByRow
+		if err := rows.Scan(
+			&i.ID,
+			&i.Email,
+			&i.Status,
+			&i.CreatedAt,
+			&i.FirstName,
+			&i.LastName,
+			&i.Roles,
+		); err != nil {
+			return nil, err
+		}
+		items = append(items, i)
+	}
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+	return items, nil
 }
 
 const recordUserLogin = `-- name: RecordUserLogin :exec
@@ -117,6 +209,46 @@ WHERE id = $1
 
 func (q *Queries) RecordUserLogin(ctx context.Context, id uuid.UUID) error {
 	_, err := q.db.Exec(ctx, recordUserLogin, id)
+	return err
+}
+
+const setUserInvitedBy = `-- name: SetUserInvitedBy :exec
+UPDATE users
+SET invited_by = $1
+WHERE id = $2
+`
+
+type SetUserInvitedByParams struct {
+	InvitedBy pgtype.UUID `json:"invited_by"`
+	ID        uuid.UUID   `json:"id"`
+}
+
+// M34: inviter tracking — every provisioned login (admin/staff/parent
+// account) stores who minted it, powering "see your invitees" and
+// inviter-block rights without a separate table. Admins re-provisioning
+// themselves? services refuse self-provisioning, so no self-cycle.
+func (q *Queries) SetUserInvitedBy(ctx context.Context, arg SetUserInvitedByParams) error {
+	_, err := q.db.Exec(ctx, setUserInvitedBy, arg.InvitedBy, arg.ID)
+	return err
+}
+
+const setUserMustChangePassword = `-- name: SetUserMustChangePassword :exec
+UPDATE users
+SET must_change_password = $1
+WHERE id = $2
+`
+
+type SetUserMustChangePasswordParams struct {
+	MustChangePassword bool      `json:"must_change_password"`
+	ID                 uuid.UUID `json:"id"`
+}
+
+// M34: bootstrap accounts (the master admin) are provisioned with a
+// temporary password the developer knows; the flag forces a change at the
+// first login (the auth middleware rejects everything but change/logout/me
+// while it is set) so the bootstrap credential cannot be reused afterwards.
+func (q *Queries) SetUserMustChangePassword(ctx context.Context, arg SetUserMustChangePasswordParams) error {
+	_, err := q.db.Exec(ctx, setUserMustChangePassword, arg.MustChangePassword, arg.ID)
 	return err
 }
 

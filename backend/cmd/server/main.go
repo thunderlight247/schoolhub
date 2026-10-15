@@ -18,17 +18,23 @@ import (
 	"github.com/thunderlight247/schoolhub/backend/config"
 	db "github.com/thunderlight247/schoolhub/backend/db/generated"
 	"github.com/thunderlight247/schoolhub/backend/internal/academics"
+	"github.com/thunderlight247/schoolhub/backend/internal/adminaccounts"
 	"github.com/thunderlight247/schoolhub/backend/internal/announcements"
 	"github.com/thunderlight247/schoolhub/backend/internal/assessments"
 	"github.com/thunderlight247/schoolhub/backend/internal/assignments"
 	"github.com/thunderlight247/schoolhub/backend/internal/attendance"
+	"github.com/thunderlight247/schoolhub/backend/internal/audit"
 	"github.com/thunderlight247/schoolhub/backend/internal/auth"
 	"github.com/thunderlight247/schoolhub/backend/internal/dashboard"
 	"github.com/thunderlight247/schoolhub/backend/internal/database"
+	"github.com/thunderlight247/schoolhub/backend/internal/email"
 	"github.com/thunderlight247/schoolhub/backend/internal/enrollment"
 	"github.com/thunderlight247/schoolhub/backend/internal/parentportal"
+	"github.com/thunderlight247/schoolhub/backend/internal/ratelimit"
 	"github.com/thunderlight247/schoolhub/backend/internal/rbac"
+	"github.com/thunderlight247/schoolhub/backend/internal/reports"
 	"github.com/thunderlight247/schoolhub/backend/internal/staff"
+	"github.com/thunderlight247/schoolhub/backend/internal/studentportal"
 	"github.com/thunderlight247/schoolhub/backend/internal/students"
 	"github.com/thunderlight247/schoolhub/backend/internal/teacherportal"
 )
@@ -57,10 +63,29 @@ func main() {
 
 	const sessionCookieName = "schoolhub_session"
 	authHandler := auth.NewHandler(authService, auth.CookieConfig{
-		Name:   sessionCookieName,
-		Domain: cfg.CookieDomain,
-		Secure: cfg.IsProduction(),
+		Name:     sessionCookieName,
+		Domain:   cfg.CookieDomain,
+		Secure:   cfg.IsProduction(),
+		SameSite: cfg.CookieSameSiteMode(),
 	})
+
+	// Optional Clerk bridge (hybrid auth): when CLERK_SECRET_KEY is set the
+	// frontend can exchange a verified Clerk session JWT for our session
+	// cookie. Classic email/password login always remains available.
+	clerkVerifier := auth.NewClerkVerifier(cfg.ClerkSecretKey)
+	clerkAuthHandler := auth.NewHandlerWithClerk(authService, auth.CookieConfig{
+		Name:     sessionCookieName,
+		Domain:   cfg.CookieDomain,
+		Secure:   cfg.IsProduction(),
+		SameSite: cfg.CookieSameSiteMode(),
+	}, clerkVerifier)
+
+	// M34: forced first-login password change + the Clerk-mode counterpart
+	// that just clears the flag once the frontend rotated the password in
+	// Clerk's own credential store.
+	passwordChangeService := auth.NewPasswordChangeService(pool)
+	passwordChangeHandler := auth.NewChangeHandler(passwordChangeService)
+	clerkPasswordChangeHandler := auth.NewClerkPasswordChangedHandler(passwordChangeService)
 
 	rbacService := rbac.NewService(queries)
 	rbacHandler := rbac.NewHandler(queries)
@@ -71,6 +96,7 @@ func main() {
 
 	router := gin.Default()
 	router.Use(corsMiddleware(cfg.FrontendURL))
+	router.Use(securityHeadersMiddleware(cfg.IsProduction()))
 
 	// /api/v1/health lets the frontend, deployment platform, and load
 	// balancers all verify the API is up and can reach the database.
@@ -92,11 +118,29 @@ func main() {
 		})
 	})
 
+	// M20: 10 login attempts per minute per IP. Scoped to login only — see
+	// internal/ratelimit's package comment for why not applied more
+	// broadly.
+	loginLimiter := ratelimit.New(10, time.Minute)
+
 	v1 := router.Group("/api/v1")
 	{
-		v1.POST("/auth/login", authHandler.Login)
+		v1.POST("/auth/login", loginLimiter.Middleware(), authHandler.Login)
 		v1.POST("/auth/logout", authHandler.Logout)
 		v1.GET("/me", auth.RequireAuth(authService, sessionCookieName), authHandler.Me)
+		if clerkVerifier.Enabled() {
+			v1.POST("/auth/clerk-session", clerkAuthHandler.ClerkSession)
+		}
+
+		// M34 forced first-login password change. ChangePassword re-checks
+		// the CURRENT password, so it shares the login rate limiter's per-IP
+		// bucket; ClerkPasswordChanged requires only a valid session (Clerk
+		// already proved identity) and needs no limiter. Both live behind
+		// RequireAuth, whose PASSWORD_CHANGE_REQUIRED allowlist lets flagged
+		// accounts reach these three endpoints and nothing else.
+		requireAuth := auth.RequireAuth(authService, sessionCookieName)
+		v1.POST("/auth/change-password", requireAuth, loginLimiter.Middleware(), passwordChangeHandler.ChangePassword)
+		v1.POST("/auth/clerk-password-changed", requireAuth, clerkPasswordChangeHandler.ClerkPasswordChanged)
 	}
 
 	// RBAC management: viewing roles/permissions and customizing which
@@ -121,6 +165,14 @@ func main() {
 	// staff.update — suspending someone's employment is a bigger deal than
 	// fixing their phone number.
 	staffService := staff.NewService(pool)
+
+	// Optional outbound email (Resend). Every mail path is best-effort:
+	// providers are enhancement, never a hard dependency.
+	mailer := email.New(cfg.ResendAPIKey, cfg.EmailFromAddress)
+	staffService.SetMailer(mailer, cfg.FrontendURL)
+	// Same optional Clerk invitation as the parent flow: provisioning a
+	// staff/teacher account emails the official Clerk invite.
+	staffService.SetInviter(auth.NewClerkInviter(cfg.ClerkSecretKey, cfg.FrontendURL+"/register"))
 	staffHandler := staff.NewHandler(staffService)
 
 	staffRoutes := v1.Group("")
@@ -164,6 +216,11 @@ func main() {
 	// student.* permission code. Guardians reuse the student.* permissions
 	// (section 11 has no separate guardian.* codes).
 	studentService := students.NewService(pool)
+	studentService.SetMailer(mailer, cfg.FrontendURL)
+	// Optional Clerk invitations: when configured, provisioning a parent or
+	// staff account also emails an official Clerk "create your password"
+	// invitation for the same address (best-effort).
+	studentService.SetInviter(auth.NewClerkInviter(cfg.ClerkSecretKey, cfg.FrontendURL+"/register"))
 	studentHandler := students.NewHandler(studentService)
 
 	studentRoutes := v1.Group("")
@@ -182,7 +239,24 @@ func main() {
 		createStudents.Use(rbac.RequirePermission(rbacService, "student.create"))
 		{
 			createStudents.POST("/students", studentHandler.CreateStudent)
-			createStudents.POST("/guardians", studentHandler.CreateGuardian)
+		}
+
+		// Inviting a guardian is its own power (M34: "teachers invite
+		// parents") — separate from student minting, which stays admin-only.
+		createGuardians := studentRoutes.Group("")
+		createGuardians.Use(rbac.RequirePermission(rbacService, "guardian.create"))
+		{
+			createGuardians.POST("/guardians", studentHandler.CreateGuardian)
+		}
+
+		// Parent access provisioning (expert-pass follow-up): the "Create
+		// parent access" action on a guardian's profile. Retitles to the
+		// guardian.create code in M34 so the INVITER role (teacher) can
+		// provision the parent too — admins keep it via the same code.
+		provisionParents := studentRoutes.Group("")
+		provisionParents.Use(rbac.RequirePermission(rbacService, "guardian.create"))
+		{
+			provisionParents.POST("/guardians/:id/account", studentHandler.CreateGuardianAccount)
 		}
 
 		updateStudents := studentRoutes.Group("")
@@ -406,6 +480,7 @@ func main() {
 	// and audience feed filtering. Permissions are announcement.view,
 	// announcement.create, and announcement.update.
 	announcementsService := announcements.NewService(pool)
+	announcementsService.SetMailer(mailer)
 	announcementsHandler := announcements.NewHandler(announcementsService)
 	announcementRoutes := v1.Group("")
 	announcementRoutes.Use(auth.RequireAuth(authService, sessionCookieName))
@@ -454,9 +529,10 @@ func main() {
 	teacherPortalRoutes := v1.Group("")
 	teacherPortalRoutes.Use(auth.RequireAuth(authService, sessionCookieName))
 	teacherPortalRoutes.Use(rbac.RequireRole(rbacService, "TEACHER"))
-	{	teacherPortalRoutes.GET("/portal/teacher/overview", teacherPortalHandler.GetTeacherOverview)
-	teacherPortalRoutes.GET("/portal/teacher/classes", teacherPortalHandler.GetTeacherClasses)
-	teacherPortalRoutes.GET("/portal/teacher/classes/:id/roster", teacherPortalHandler.GetClassRoster)
+	{
+		teacherPortalRoutes.GET("/portal/teacher/overview", teacherPortalHandler.GetTeacherOverview)
+		teacherPortalRoutes.GET("/portal/teacher/classes", teacherPortalHandler.GetTeacherClasses)
+		teacherPortalRoutes.GET("/portal/teacher/classes/:id/roster", teacherPortalHandler.GetClassRoster)
 	}
 
 	// Parent portal (M16): parent-specific read-only context (guardian profile,
@@ -473,6 +549,104 @@ func main() {
 	{
 		parentPortalRoutes.GET("/portal/parent/overview", parentPortalHandler.GetParentOverview)
 		parentPortalRoutes.GET("/portal/parent/children/:id", parentPortalHandler.GetChildDetail)
+	}
+
+	// Student portal (M17): student-specific read-only context (own profile,
+	// active enrollment and academic calendar context, lifetime attendance and
+	// results aggregates, recent attendance marks, results history, and targeted
+	// announcements). Row-level scoping ("only their own records") is enforced
+	// in the service by resolving the student row from the authenticated user's
+	// person_id; no endpoint accepts a student id. Gated on the STUDENT role.
+	studentPortalService := studentportal.NewService(pool)
+	studentPortalHandler := studentportal.NewHandler(studentPortalService)
+	studentPortalRoutes := v1.Group("")
+	studentPortalRoutes.Use(auth.RequireAuth(authService, sessionCookieName))
+	studentPortalRoutes.Use(rbac.RequireRole(rbacService, "STUDENT"))
+	{
+		studentPortalRoutes.GET("/portal/student/overview", studentPortalHandler.GetStudentOverview)
+		studentPortalRoutes.GET("/portal/student/attendance", studentPortalHandler.GetStudentAttendance)
+		studentPortalRoutes.GET("/portal/student/results", studentPortalHandler.GetStudentResultsHistory)
+		studentPortalRoutes.GET("/portal/student/enrollments", studentPortalHandler.GetStudentEnrollments)
+	}
+
+	// Reports (M18): institutional and academic analytical outputs (enrollment summaries,
+	// class attendance analytics, class performance distribution, and student report cards).
+	// Gated on the report.view permission.
+	reportsService := reports.NewService(pool)
+	reportsHandler := reports.NewHandler(reportsService)
+	reportRoutes := v1.Group("")
+	reportRoutes.Use(auth.RequireAuth(authService, sessionCookieName))
+	reportRoutes.Use(rbac.RequirePermission(rbacService, "report.view"))
+	{
+		reportRoutes.GET("/reports/enrollment", reportsHandler.GetEnrollmentReport)
+		reportRoutes.GET("/reports/attendance/classes/:id", reportsHandler.GetClassAttendanceReport)
+		reportRoutes.GET("/reports/performance/classes/:id", reportsHandler.GetClassPerformanceReport)
+		reportRoutes.GET("/reports/students/:id/report-card", reportsHandler.GetStudentReportCard)
+	}
+
+	// Audit logs (M19): authorized admin review of the audit trail every
+	// mutation since M6 has been writing (internal/audit.Record). Read-only;
+	// gated on the audit.view permission.
+	auditLogService := audit.NewService(pool)
+	auditLogHandler := audit.NewHandler(auditLogService)
+	auditLogRoutes := v1.Group("")
+	auditLogRoutes.Use(auth.RequireAuth(authService, sessionCookieName))
+	auditLogRoutes.Use(rbac.RequirePermission(rbacService, "audit.view"))
+	{
+		auditLogRoutes.GET("/audit-logs", auditLogHandler.ListAuditLogs)
+		auditLogRoutes.GET("/audit-logs/:id", auditLogHandler.GetAuditLog)
+		auditLogRoutes.GET("/audit-logs/actions", auditLogHandler.ListActions)
+	}
+
+	// Admin/account access control (expert pass follow-up).
+	//
+	// Two audiences, two gates:
+	//   * Managing ADMINS (list admins, revoke the ADMIN role) is
+	//     master-admin business: both admin.manage permission AND the
+	//     MASTER_ADMIN role are required (the permission exists so RBAC
+	//     masters can express the concept; the second, role-based gate
+	//     means granting admin.manage to a plain admin still can't promote
+	//     them into a position to revoke their peers).
+	//   * Blocking/unblocking TEACHER/STAFF/PARENT/STUDENT accounts is
+	//     every admin's power, gated on account.block. Blocks kill live
+	//     sessions immediately (auth.ValidateSession re-checks status).
+	adminAccountsService := adminaccounts.NewService(pool)
+	// M34: newly added admins activate through the Clerk invitation email,
+	// same best-effort bridge staff/parent provisioning already uses.
+	adminAccountsService.SetInviter(auth.NewClerkInviter(cfg.ClerkSecretKey, cfg.FrontendURL+"/register"), cfg.FrontendURL)
+	adminAccountsHandler := adminaccounts.NewHandler(adminAccountsService)
+	adminAccountsRoutes := v1.Group("")
+	adminAccountsRoutes.Use(auth.RequireAuth(authService, sessionCookieName))
+	{
+		adminManage := adminAccountsRoutes.Group("")
+		adminManage.Use(rbac.RequirePermission(rbacService, "admin.manage"))
+		adminManage.Use(rbac.RequireRole(rbacService, "MASTER_ADMIN"))
+		{
+			adminManage.GET("/admins", adminAccountsHandler.ListAdmins)
+			adminManage.PUT("/users/:id/admin-role", adminAccountsHandler.RevokeAdmin)
+			// M34: master-admin-only admin provisioning (person + user + ADMIN
+			// role + Clerk invite in one transaction).
+			adminManage.POST("/admins", adminAccountsHandler.CreateAdmin)
+		}
+
+		blockable := adminAccountsRoutes.Group("")
+		blockable.Use(rbac.RequirePermission(rbacService, "account.block"))
+		{
+			blockable.GET("/accounts", adminAccountsHandler.ListAccountsByRole)
+			blockable.PUT("/users/:id/status", adminAccountsHandler.Block)
+		}
+
+		// "Every inviter can see invitees" (M34): any authenticated user —
+		// teachers included — lists the accounts THEY minted. Access control
+		// is the service filter (users.invited_by = caller), not a permission.
+		invitees := adminAccountsRoutes.Group("")
+		{
+			invitees.GET("/my-invitees", adminAccountsHandler.ListMyInvitees)
+			// Inviter-side suspend/restore, strictly scoped in the service to
+			// accounts the CALLER provisioned (the account.block route stays
+			// for admin-level use).
+			invitees.PUT("/my-invitees/:id/status", adminAccountsHandler.InviteeStatus)
+		}
 	}
 
 	addr := ":" + cfg.Port
@@ -493,7 +667,7 @@ func corsMiddleware(allowedOrigin string) gin.HandlerFunc {
 	return func(c *gin.Context) {
 		c.Header("Access-Control-Allow-Origin", allowedOrigin)
 		c.Header("Access-Control-Allow-Credentials", "true")
-		c.Header("Access-Control-Allow-Methods", "GET, POST, PATCH, DELETE, OPTIONS")
+		c.Header("Access-Control-Allow-Methods", "GET, POST, PUT, PATCH, DELETE, OPTIONS")
 		c.Header("Access-Control-Allow-Headers", "Content-Type, Authorization")
 
 		if c.Request.Method == http.MethodOptions {
@@ -501,6 +675,28 @@ func corsMiddleware(allowedOrigin string) gin.HandlerFunc {
 			return
 		}
 
+		c.Next()
+	}
+}
+
+// securityHeadersMiddleware sets baseline HTTP security headers (section
+// 28). This is a JSON API, not a page-serving app, so most of the
+// classic browser-security headers (CSP, X-XSS-Protection) don't have
+// much to guard here — these three are the ones that still matter: don't
+// let a browser guess/sniff a response's content type into something
+// executable, don't let this origin be framed, and don't leak the full
+// referrer URL (which can include query strings with tokens/ids) to
+// third parties. HSTS is production-only: sending it over local HTTP dev
+// would make the browser force HTTPS for localhost going forward, which
+// actively breaks local testing rather than protecting anything.
+func securityHeadersMiddleware(isProduction bool) gin.HandlerFunc {
+	return func(c *gin.Context) {
+		c.Header("X-Content-Type-Options", "nosniff")
+		c.Header("X-Frame-Options", "DENY")
+		c.Header("Referrer-Policy", "strict-origin-when-cross-origin")
+		if isProduction {
+			c.Header("Strict-Transport-Security", "max-age=63072000; includeSubDomains")
+		}
 		c.Next()
 	}
 }

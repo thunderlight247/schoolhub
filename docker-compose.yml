@@ -28,7 +28,20 @@ services:
     environment:
       PORT: 8080
       APP_ENV: development
-      DATABASE_URL: postgres://${POSTGRES_USER:-schoolhub}:${POSTGRES_PASSWORD:-schoolhub}@postgres:5432/${POSTGRES_DB:-schoolhub}?sslmode=disable
+      # M20: connects as the least-privilege schoolhub_app role, not the
+      # schema-owning schoolhub role migrate/sqlc use. Run
+      # backend/scripts/create_app_role.sql once (see README's M20
+      # section) before this will work — until then the backend will fail
+      # to authenticate as schoolhub_app.
+      DATABASE_URL: postgres://schoolhub_app:${SCHOOLHUB_APP_PASSWORD:-schoolhub_app_dev}@postgres:5432/${POSTGRES_DB:-schoolhub}?sslmode=disable
+      # Optional Clerk auth bridge + Resend outbound email. Values live in
+      # .env at the repo root (gitignored); both empty = classic session
+      # auth and no email.
+      CLERK_SECRET_KEY: ${CLERK_SECRET_KEY:-}
+      RESEND_API_KEY: ${RESEND_API_KEY:-}
+      EMAIL_FROM_ADDRESS: ${EMAIL_FROM_ADDRESS:-SchoolHub Academy <onboarding@resend.dev>}
+    env_file:
+      - ./backend/.env
     ports:
       - "8080:8080"
 
@@ -46,6 +59,10 @@ services:
   #   docker compose run --rm migrate up
   #   docker compose run --rm migrate down 1
   #   docker compose run --rm migrate version
+  #
+  # Deliberately still runs as the owning `schoolhub` role, not
+  # schoolhub_app — schema changes (CREATE TABLE, ALTER TABLE, ...) are
+  # exactly the DDL schoolhub_app does NOT have.
   migrate:
     image: migrate/migrate:v4.17.1
     profiles: ["tools"]

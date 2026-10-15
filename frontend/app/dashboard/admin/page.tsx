@@ -1,9 +1,10 @@
 "use client";
 
 import { useEffect, useState } from "react";
-import Link from "next/link";
 import { AdminDashboardData } from "@/types/dashboard";
 import { fetchAdminDashboard } from "@/services/dashboard";
+import { AppShell } from "@/components/app-shell";
+import { ProtectedRoute } from "@/components/protected-route";
 
 export default function AdminDashboardPage() {
   const [data, setData] = useState<AdminDashboardData | null>(null);
@@ -31,43 +32,32 @@ export default function AdminDashboardPage() {
     loadData();
   }, []);
 
+  const contextChips = (
+    <>
+      {data?.academic_context?.academic_year_name && (
+        <span className="rounded-full bg-brand-50 px-3 py-1 text-xs font-semibold text-brand-700 border border-brand-100">
+          AY {data.academic_context.academic_year_name}
+        </span>
+      )}
+      {data?.academic_context?.term_name && (
+        <span className="rounded-full bg-slate-100 px-3 py-1 text-xs font-medium text-slate-700 border border-slate-200">
+          {data.academic_context.term_name}
+        </span>
+      )}
+      <button
+        onClick={loadData}
+        disabled={loading}
+        className="rounded-md border border-slate-200 bg-white px-3 py-1.5 text-xs font-medium text-slate-700 shadow-sm hover:bg-slate-50 disabled:opacity-50"
+      >
+        Refresh
+      </button>
+    </>
+  );
+
   return (
-    <div className="min-h-screen bg-slate-50 text-slate-900 pb-16">
-      {/* Top Header */}
-      <header className="border-b border-slate-200 bg-white sticky top-0 z-10 shadow-sm">
-        <div className="mx-auto flex max-w-7xl items-center justify-between px-4 py-4 sm:px-6 lg:px-8">
-          <div className="flex items-center gap-3">
-            <Link href="/" className="text-xl font-bold text-brand-900 hover:text-brand-700">
-              SchoolHub
-            </Link>
-            <span className="text-slate-300">/</span>
-            <span className="text-sm font-medium text-slate-600">Admin Dashboard</span>
-          </div>
-
-          <div className="flex items-center gap-3">
-            {data?.academic_context?.academic_year_name && (
-              <span className="rounded-full bg-brand-50 px-3 py-1 text-xs font-semibold text-brand-700 border border-brand-100">
-                AY {data.academic_context.academic_year_name}
-              </span>
-            )}
-            {data?.academic_context?.term_name && (
-              <span className="rounded-full bg-slate-100 px-3 py-1 text-xs font-medium text-slate-700 border border-slate-200">
-                {data.academic_context.term_name}
-              </span>
-            )}
-            <button
-              onClick={loadData}
-              disabled={loading}
-              className="rounded-md border border-slate-200 bg-white px-3 py-1.5 text-xs font-medium text-slate-700 shadow-sm hover:bg-slate-50 disabled:opacity-50"
-            >
-              Refresh
-            </button>
-          </div>
-        </div>
-      </header>
-
-      {/* Main Container */}
-      <main className="mx-auto max-w-7xl px-4 py-8 sm:px-6 lg:px-8 space-y-8">
+    <ProtectedRoute requiredRole="ADMIN">
+      <AppShell title="Admin Dashboard" actions={contextChips}>
+        <div className="space-y-8">
         {/* Title & Welcome */}
         <div className="flex flex-col sm:flex-row sm:items-center sm:justify-between gap-4">
           <div>
@@ -312,7 +302,8 @@ export default function AdminDashboardPage() {
             </div>
           </div>
         </div>
-      </main>
-    </div>
+        </div>
+      </AppShell>
+    </ProtectedRoute>
   );
 }
