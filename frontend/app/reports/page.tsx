@@ -268,7 +268,7 @@ export default function ReportsPage() {
                 <p className="text-xs text-slate-400 py-8 text-center">No enrollment records found.</p>
               ) : (
                 <div className="overflow-x-auto">
-                  <table className="w-full text-left text-xs">
+                  <table className="w-full min-w-[760px] text-left text-xs">
                     <thead className="border-b border-slate-200 bg-slate-50 text-slate-600">
                       <tr>
                         <th className="py-2.5 px-3 font-semibold">Class Name</th>
@@ -430,7 +430,7 @@ export default function ReportsPage() {
                 </div>
 
                 <div className="overflow-x-auto">
-                  <table className="w-full text-left text-xs">
+                  <table className="w-full min-w-[760px] text-left text-xs">
                     <thead className="border-b border-slate-200 bg-slate-50 text-slate-600">
                       <tr>
                         <th className="py-2.5 px-3 font-semibold">Student Name</th>
@@ -572,7 +572,7 @@ export default function ReportsPage() {
                   </p>
                 ) : (
                   <div className="overflow-x-auto">
-                    <table className="w-full text-left text-xs">
+                    <table className="w-full min-w-[760px] text-left text-xs">
                       <thead className="border-b border-slate-200 bg-slate-50 text-slate-600">
                         <tr>
                           <th className="py-2.5 px-3 font-semibold">Date</th>
@@ -738,7 +738,7 @@ export default function ReportsPage() {
                 <div>
                   <h4 className="font-bold text-slate-900 text-sm mb-3">Academic Subjects Evaluation</h4>
                   <div className="overflow-x-auto border rounded-lg border-slate-200">
-                    <table className="w-full text-left text-xs">
+                    <table className="w-full min-w-[700px] text-left text-xs">
                       <thead className="border-b border-slate-200 bg-slate-50 text-slate-700">
                         <tr>
                           <th className="py-2.5 px-3 font-semibold">Subject Code</th>

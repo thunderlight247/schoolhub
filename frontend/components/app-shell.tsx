@@ -135,14 +135,14 @@ export function AppShell({ title, actions, children }: AppShellProps) {
             {user ? (
               <button
                 onClick={handleLogout}
-                className="rounded-md border border-slate-200 bg-white px-3 py-1.5 text-xs font-medium text-slate-700 shadow-sm hover:bg-slate-50"
+                className="min-h-11 rounded-md border border-slate-200 bg-white px-3 text-xs font-medium text-slate-700 shadow-sm hover:bg-slate-50"
               >
                 Sign out
               </button>
             ) : (
               <Link
                 href="/login"
-                className="rounded-md bg-brand-700 px-3 py-1.5 text-xs font-semibold text-white shadow-sm hover:bg-brand-600"
+                className="min-h-11 rounded-md bg-brand-700 px-3 text-xs font-semibold text-white shadow-sm hover:bg-brand-600"
               >
                 Sign in
               </Link>
@@ -159,7 +159,7 @@ export function AppShell({ title, actions, children }: AppShellProps) {
                 key={item.href}
                 href={item.href}
                 aria-current={active ? "page" : undefined}
-                className={`whitespace-nowrap rounded-md px-3 py-1.5 text-xs font-medium ${
+                className={`inline-flex min-h-9 items-center whitespace-nowrap rounded-md px-3 py-1.5 text-xs font-medium ${
                   active ? "bg-brand-50 text-brand-900" : "text-slate-600 hover:bg-slate-50"
                 }`}
               >
