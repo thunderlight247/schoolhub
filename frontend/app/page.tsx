@@ -1,4 +1,5 @@
 import Link from "next/link";
+import { SiteMobileNav } from "@/components/site-mobile-nav";
 
 const NAV_LINKS = [
   { href: "#about", label: "About" },
@@ -126,6 +127,7 @@ export default function HomePage() {
             >
               Sign in
             </Link>
+            <SiteMobileNav />
             <Link
               href="#admissions"
               className="rounded-lg bg-brand-700 px-4 py-2 text-sm font-semibold text-white shadow-sm transition-colors hover:bg-brand-600"
@@ -212,7 +214,7 @@ export default function HomePage() {
             </p>
             <a
               href="#academics"
-              className="mt-6 inline-flex items-center gap-1 text-sm font-semibold text-brand-700 hover:text-brand-600"
+              className="mt-6 inline-flex -my-2 items-center gap-1 py-2 text-sm font-semibold text-brand-700 hover:text-brand-600"
             >
               Explore our programmes <span aria-hidden>&rarr;</span>
             </a>
@@ -354,12 +356,12 @@ export default function HomePage() {
               <li>123 Independence Avenue</li>
               <li>Accra, Ghana</li>
               <li>
-                <a href="tel:+233300000000" className="hover:text-white">
+                <a href="tel:+233300000000" className="inline-block -my-1.5 py-1.5 hover:text-white">
                   +233 30 000 0000
                 </a>
               </li>
               <li>
-                <a href="mailto:hello@schoolhub.test" className="hover:text-white">
+                <a href="mailto:hello@schoolhub.test" className="inline-block -my-1.5 py-1.5 hover:text-white">
                   hello@schoolhub.test
                 </a>
               </li>
@@ -371,16 +373,16 @@ export default function HomePage() {
             </h3>
             <ul className="mt-4 space-y-2 text-sm text-white/75">
               <li>
-                <a href="#admissions" className="hover:text-white">Admissions</a>
+                <a href="#admissions" className="inline-block -my-1.5 py-1.5 hover:text-white">Admissions</a>
               </li>
               <li>
-                <a href="#academics" className="hover:text-white">Academics</a>
+                <a href="#academics" className="inline-block -my-1.5 py-1.5 hover:text-white">Academics</a>
               </li>
               <li>
-                <Link href="/login" className="hover:text-white">Portal sign-in</Link>
+                <Link href="/login" className="inline-block -my-1.5 py-1.5 hover:text-white">Portal sign-in</Link>
               </li>
               <li>
-                <a href="#contact" className="hover:text-white">Contact us</a>
+                <a href="#contact" className="inline-block -my-1.5 py-1.5 hover:text-white">Contact us</a>
               </li>
             </ul>
           </div>
