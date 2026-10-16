@@ -17,20 +17,20 @@ const STATS = [
 
 const PROGRAMMES = [
   {
-    title: "Lower School",
-    years: "Grades 1 – 6",
+    title: "Primary School",
+    years: "Basic 1 – 6",
     blurb:
       "A joyful, structured foundation where curiosity is trained into confident reading, numeracy and inquiry habits.",
   },
   {
-    title: "Middle School",
-    years: "Grades 7 – 9",
+    title: "Junior High School (J.H.S)",
+    years: "J.H.S 1 – 3",
     blurb:
       "Subject-deep teaching with mentor-led study skills, letting every learner find their strengths before the senior years.",
   },
   {
-    title: "Senior School",
-    years: "Grades 10 – 12",
+    title: "Senior High School (S.H.S)",
+    years: "S.H.S 1 – 3",
     blurb:
       "Rigorous university-preparatory tracks in Sciences, Humanities and Business with university counselling from day one.",
   },
@@ -152,7 +152,7 @@ export default function HomePage() {
           </h1>
           <p className="mt-4 max-w-xl text-base leading-relaxed text-white/80 sm:text-lg">
             SchoolHub Academy pairs rigorous academics with genuine care for every
-            child — from the first day of Grade 1 to the university acceptance letter.
+            child — from the first day of Basic 1 to the university acceptance letter.
           </p>
           <div className="mt-8 flex flex-wrap gap-3">
             <a
