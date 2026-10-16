@@ -103,6 +103,16 @@ func (s *Service) Login(ctx context.Context, email, password string, userAgent, 
 		return "", AuthenticatedUser{}, ErrInvalidCredentials
 	}
 
+	return s.StartSessionForUser(ctx, user, userAgent, ipAddress)
+}
+
+// StartSessionForUser issues a fresh session for a user whose identity the
+// caller has already established (the normal email/password Login uses it
+// after VerifyPassword succeeds, and the demo-mode one-click sign-in uses
+// it after resolving a designated demo persona row). It creates the session
+// row, records the login, and resolves the user's roles and permissions —
+// everything except the credential check itself.
+func (s *Service) StartSessionForUser(ctx context.Context, user db.User, userAgent, ipAddress string) (string, AuthenticatedUser, error) {
 	token, err := GenerateToken()
 	if err != nil {
 		return "", AuthenticatedUser{}, err

@@ -29,6 +29,30 @@ export async function fetchMe(): Promise<MeResponse> {
 }
 
 /**
+ * Demo deployment capability probe: GET /auth/demo-mode reports whether
+ * this backend has the one-click demo sign-in mounted (DEMO_MODE). The
+ * login page uses it to decide whether to render the persona picker; a
+ * 404 (older backend) simply hides it.
+ */
+export async function fetchDemoMode(): Promise<boolean> {
+  const res = await apiGet<{ demo_mode: boolean }>("/auth/demo-mode");
+  return res.demo_mode;
+}
+
+export type DemoRole = "admin" | "teacher" | "parent";
+
+/**
+ * One-click demo sign-in: the backend resolves the designated persona
+ * account for the role (admin, teacher, or parent), seeds an account for
+ * it if needed, and issues the ordinary httpOnly session cookie — the
+ * response shape matches the password login exactly. Only mounted on
+ * demo deployments (DEMO_MODE).
+ */
+export async function demoLogin(role: DemoRole): Promise<LoginResponse> {
+  return apiPost<LoginResponse>("/auth/demo-login", { as: role });
+}
+
+/**
  * Clerk bridge: exchange a verified-on-the-server Clerk session JWT for our
  * standard httpOnly session cookie. The backend verifies the JWT against
  * Clerk, matches the email to a provisioned account, and issues the session

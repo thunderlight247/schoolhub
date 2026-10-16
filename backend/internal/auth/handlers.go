@@ -77,6 +77,14 @@ func toUserDTO(u AuthenticatedUser) userDTO {
 	}
 }
 
+// ToUserDTO exposes the same "current user" payload shape the login and
+// /me endpoints return, for flows that authenticate without a password
+// (the demo one-click sign-in). The DTO type itself stays unexported —
+// callers only serialize it to JSON, never mutate it.
+func ToUserDTO(u AuthenticatedUser) userDTO {
+	return toUserDTO(u)
+}
+
 // Login handles POST /api/v1/auth/login.
 func (h *Handler) Login(c *gin.Context) {
 	var req loginRequest

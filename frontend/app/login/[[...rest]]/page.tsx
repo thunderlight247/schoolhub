@@ -21,9 +21,10 @@ import { SignIn, useUser } from "@clerk/nextjs";
 import { useAuth } from "@/components/auth-provider";
 import { ApiError } from "@/lib/api";
 import { isClerkEnabled } from "@/lib/clerk";
+import { demoLogin, fetchDemoMode, type DemoRole } from "@/services/auth";
 
 function roleHome(roles: string[]): string {
-  if (roles.includes("ADMIN")) return "/dashboard/admin";
+  if (roles.includes("ADMIN") || roles.includes("MASTER_ADMIN")) return "/dashboard/admin";
   if (roles.includes("TEACHER")) return "/portal/teacher";
   if (roles.includes("PARENT")) return "/portal/parent";
   if (roles.includes("STUDENT")) return "/portal/student";
@@ -129,6 +130,31 @@ function ClerkLoginForm() {
   );
 }
 
+// Demo persona card: rendered only when the backend reports the one-click
+// demo sign-in is mounted (GET /auth/demo-mode → demo_mode: true). Each
+// button opens a real session for the corresponding persona — same cookies,
+// same roles, same row-level scoping — without anyone sharing a password.
+const DEMO_PERSONAS: { role: DemoRole; title: string; blurb: string; icon: string }[] = [
+  {
+    role: "admin",
+    title: "Sign in as Admin",
+    blurb: "School-wide view: students, staff, reports, announcements.",
+    icon: "🏫",
+  },
+  {
+    role: "teacher",
+    title: "Sign in as Teacher",
+    blurb: "Your classes, attendance register, assessment scoring.",
+    icon: "🧑‍🏫",
+  },
+  {
+    role: "parent",
+    title: "Sign in as Parent",
+    blurb: "Only your own children: attendance, results, notices.",
+    icon: "👪",
+  },
+];
+
 function LegacyLoginForm() {
   const { login } = useAuth();
   const router = useRouter();
@@ -139,6 +165,43 @@ function LegacyLoginForm() {
   const [password, setPassword] = useState("");
   const [error, setError] = useState<string | null>(null);
   const [submitting, setSubmitting] = useState(false);
+
+  // Demo mode discovery: null until resolved; false (or resolution
+  // failure, e.g. an older backend without the probe) hides the picker.
+  const [demoMode, setDemoMode] = useState<boolean | null>(null);
+  const [demoRole, setDemoRole] = useState<DemoRole | null>(null);
+
+  useEffect(() => {
+    let cancelled = false;
+    fetchDemoMode()
+      .then((enabled) => {
+        if (!cancelled) setDemoMode(enabled);
+      })
+      .catch(() => {
+        if (!cancelled) setDemoMode(false);
+      });
+    return () => {
+      cancelled = true;
+    };
+  }, []);
+
+  const handleDemoSignIn = async (role: DemoRole) => {
+    setError(null);
+    setDemoRole(role);
+    try {
+      const res = await demoLogin(role);
+      navigateAfterAuth(
+        nextPath && nextPath.startsWith("/") ? nextPath : roleHome(res.user.roles),
+      );
+    } catch (err) {
+      setError(
+        err instanceof ApiError && err.message
+          ? err.message
+          : "Demo sign-in failed. Please try again.",
+      );
+      setDemoRole(null);
+    }
+  };
 
   const handleSubmit = async (e: FormEvent) => {
     e.preventDefault();
@@ -170,6 +233,35 @@ function LegacyLoginForm() {
           </Link>
           <p className="mt-1 text-sm text-slate-500">Sign in to your workspace</p>
         </div>
+
+        {demoMode && (
+          <div className="mb-4 rounded-xl border border-brand-100 bg-brand-50/50 p-5 shadow-sm">
+            <p className="text-sm font-semibold text-brand-900">Explore the school</p>
+            <p className="mt-0.5 text-xs text-slate-500">
+              One tap opens a real account for each role — teachers see their
+              classes, parents see their own children.
+            </p>
+            <div className="mt-3 space-y-2">
+              {DEMO_PERSONAS.map((p) => (
+                <button
+                  key={p.role}
+                  type="button"
+                  disabled={demoRole !== null}
+                  onClick={() => handleDemoSignIn(p.role)}
+                  className="flex w-full items-start gap-3 rounded-lg border border-slate-200 bg-white px-3 py-2.5 text-left shadow-sm transition-colors hover:border-brand-200 hover:bg-brand-50/60 disabled:opacity-50"
+                >
+                  <span aria-hidden className="text-xl">{p.icon}</span>
+                  <span className="min-w-0">
+                    <span className="block text-sm font-semibold text-slate-800">
+                      {demoRole === p.role ? "Signing in…" : p.title}
+                    </span>
+                    <span className="block text-xs text-slate-500">{p.blurb}</span>
+                  </span>
+                </button>
+              ))}
+            </div>
+          </div>
+        )}
 
         <form
           onSubmit={handleSubmit}

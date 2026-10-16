@@ -59,6 +59,13 @@ type Config struct {
 	// "SchoolHub Academy <no-reply@schoolhub.example>". Ignored when no
 	// API key is set.
 	EmailFromAddress string
+
+	// DemoMode enables the one-click demo sign-in (POST
+	// /api/v1/auth/demo-login and GET /api/v1/auth/demo-mode). Off by
+	// default: it lets anyone on the internet open a session for the demo
+	// admin/teacher/parent personas, so it must only be set on demo
+	// deployments — never on one holding real data.
+	DemoMode bool
 }
 
 // Load reads configuration from environment variables and returns a Config.
@@ -72,9 +79,9 @@ func Load() (*Config, error) {
 		FrontendURL:      getEnv("FRONTEND_URL", "http://localhost:3000"),
 		CookieDomain:     getEnv("COOKIE_DOMAIN", ""),
 		CookieSameSite:   getEnv("COOKIE_SAMESITE", "lax"),
-		ClerkSecretKey:   os.Getenv("CLERK_SECRET_KEY"),
-		ResendAPIKey:     os.Getenv("RESEND_API_KEY"),
+		ClerkSecretKey:   os.Getenv("CLERK_SECRET_KEY"),		ResendAPIKey:    os.Getenv("RESEND_API_KEY"),
 		EmailFromAddress: getEnv("EMAIL_FROM_ADDRESS", "SchoolHub Academy <onboarding@resend.dev>"),
+		DemoMode:        getEnv("DEMO_MODE", "") == "1" || getEnv("DEMO_MODE", "") == "true",
 	}
 
 	if cfg.DatabaseURL == "" {

@@ -27,6 +27,7 @@ import (
 	"github.com/thunderlight247/schoolhub/backend/internal/auth"
 	"github.com/thunderlight247/schoolhub/backend/internal/dashboard"
 	"github.com/thunderlight247/schoolhub/backend/internal/database"
+	"github.com/thunderlight247/schoolhub/backend/internal/demo"
 	"github.com/thunderlight247/schoolhub/backend/internal/email"
 	"github.com/thunderlight247/schoolhub/backend/internal/enrollment"
 	"github.com/thunderlight247/schoolhub/backend/internal/parentportal"
@@ -141,6 +142,26 @@ func main() {
 		requireAuth := auth.RequireAuth(authService, sessionCookieName)
 		v1.POST("/auth/change-password", requireAuth, loginLimiter.Middleware(), passwordChangeHandler.ChangePassword)
 		v1.POST("/auth/clerk-password-changed", requireAuth, clerkPasswordChangeHandler.ClerkPasswordChanged)
+
+		// Demo one-click sign-in (DEMO_MODE=1/env). The capability probe is
+		// always mounted so the frontend can discover whether the persona
+		// picker should render; demo-login itself only exists when demo mode
+		// is on, and shares the login rate limiter (one-click sign-in is a
+		// login). See internal/demo for why this must never run against
+		// real data.
+		if cfg.DemoMode {
+			demoSvc := demo.NewService(pool, queries, authService)
+			demoHandler := demo.NewHandler(demoSvc, auth.CookieConfig{
+				Name:     sessionCookieName,
+				Domain:   cfg.CookieDomain,
+				Secure:   cfg.IsProduction(),
+				SameSite: cfg.CookieSameSiteMode(),
+			})
+			v1.GET("/auth/demo-mode", demo.Mode(true))
+			v1.POST("/auth/demo-login", loginLimiter.Middleware(), demoHandler.Login)
+		} else {
+			v1.GET("/auth/demo-mode", demo.Mode(false))
+		}
 	}
 
 	// RBAC management: viewing roles/permissions and customizing which
